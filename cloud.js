@@ -155,6 +155,14 @@ const styles=document.createElement('style');styles.textContent=`
 #cloudApp.world-list .grid>aside{width:100%;max-height:none;overflow:visible}
 #cloudApp.world-list #editor{display:none}
 #cloudApp.world-list .entry-list{max-height:none!important;height:auto!important;overflow:visible!important}
+
+/* Unified app scrolling: one scroll container, no artificial overflow on short pages. */
+#cloudApp{overflow-x:hidden;overflow-y:auto;overscroll-behavior-y:contain}
+#cloudApp:not(.focus-mode) .wrap{min-height:0!important;height:auto;padding-bottom:0!important}
+#cloudApp:not(.focus-mode).needs-nav-clearance .wrap{padding-bottom:calc(92px + env(safe-area-inset-bottom))!important}
+#cloudApp:not(.focus-mode) .grid,#cloudApp:not(.focus-mode) .grid>aside{min-height:0}
+#cloudApp.chapter-list .entry-list,#cloudApp.world-list .entry-list{max-height:none!important;overflow:visible!important}
+#cloudApp.chapter-list.long-chapter-list .wrap,#cloudApp.world-list.long-world-list .wrap{padding-bottom:0!important}
 `;document.head.append(styles);
 const root=document.createElement('div');root.id='cloudApp';document.body.append(root);
 function updateWriterHeight(){root.style.setProperty('--writer-height',Math.round(window.visualViewport?.height||window.innerHeight)+'px')}
@@ -276,22 +284,28 @@ function drawWorldProfile(r,el){
 }
 
 
-function updateWorldListSpacing(){
- root.classList.remove('long-world-list');
- if(!worldSections.includes(section)||active)return;
- const list=document.getElementById('entries');if(!list)return;
- const nav=document.querySelector('#cloudApp .mobile-nav');
- const navHeight=nav&&getComputedStyle(nav).display!=='none'?nav.getBoundingClientRect().height:0;
- if(list.getBoundingClientRect().bottom>window.innerHeight-navHeight-12)root.classList.add('long-world-list');
+function updateWorldListSpacing(){scheduleScrollLayout()}
+function updateChapterListSpacing(){scheduleScrollLayout()}
+let scrollLayoutPending=false;
+function scheduleScrollLayout(){
+ if(scrollLayoutPending)return;
+ scrollLayoutPending=true;
+ requestAnimationFrame(()=>{
+  scrollLayoutPending=false;
+  root.classList.remove('needs-nav-clearance','long-world-list','long-chapter-list');
+  if(root.classList.contains('focus-mode')||root.style.display==='none')return;
+  const wrap=root.querySelector('.wrap'),nav=root.querySelector('.mobile-nav');
+  if(!wrap||!nav||getComputedStyle(nav).display==='none')return;
+  const navHeight=nav.getBoundingClientRect().height;
+  // Measure the natural document height without any artificial bottom spacer.
+  // Add clearance only when real content reaches the fixed bottom navigation.
+  const naturalHeight=wrap.getBoundingClientRect().bottom-root.getBoundingClientRect().top+root.scrollTop;
+  if(naturalHeight>root.clientHeight-navHeight+2)root.classList.add('needs-nav-clearance');
+ });
 }
-function updateChapterListSpacing(){
- root.classList.remove('long-chapter-list');
- if(section!=='chapters'||active)return;
- const list=document.getElementById('entries');if(!list)return;
- const nav=document.querySelector('#cloudApp .mobile-nav');
- const navHeight=nav&&getComputedStyle(nav).display!=='none'?nav.getBoundingClientRect().height:0;
- if(list.getBoundingClientRect().bottom>window.innerHeight-navHeight-12)root.classList.add('long-chapter-list');
-}
+const scrollLayoutObserver=new MutationObserver(scheduleScrollLayout);
+scrollLayoutObserver.observe(root,{childList:true,subtree:true});
+window.addEventListener('resize',scheduleScrollLayout);
 function exitChapter(){
  if(document.getElementById('editStatus')?.textContent==='Unsaved changes…'){msg('Wait for autosave before leaving');return}
  root.classList.remove('focus-mode','chapter-detail');root.classList.add('chapter-list');chapterEditing=false;active=null;clearTimeout(timer);stopLive();
