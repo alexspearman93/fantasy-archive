@@ -122,6 +122,14 @@ const styles=document.createElement('style');styles.textContent=`
 #cloudApp.chapter-detail:not(.focus-mode) #editor{display:block;width:100%;max-width:850px;margin-inline:auto}
 #cloudApp.chapter-detail:not(.focus-mode) .world-profile-bar,
 #cloudApp.chapter-detail:not(.focus-mode) .chapter-edit-bar{position:sticky;top:0;z-index:12;background:#171c17;padding:10px 0;border-bottom:1px solid #41483d}
+
+/* Full-width, unboxed manuscript chapter index. */
+#cloudApp.chapter-list .wrap{max-width:none;width:100%}
+#cloudApp.chapter-list .grid{max-width:none;width:100%;margin:0}
+#cloudApp.chapter-list .grid>aside{border:0;border-radius:0;box-shadow:none;background:transparent;padding:8px 0;width:100%}
+#cloudApp.chapter-list .entry-list{width:100%;max-width:none}
+#cloudApp.chapter-list .entry-list .item{width:100%;text-align:left}
+@media(max-width:680px){#cloudApp.chapter-list .wrap{padding-left:12px;padding-right:12px}}
 `;document.head.append(styles);
 const root=document.createElement('div');root.id='cloudApp';document.body.append(root);
 function updateWriterHeight(){root.style.setProperty('--writer-height',Math.round(window.visualViewport?.height||window.innerHeight)+'px')}
