@@ -5,9 +5,10 @@ const KEY='sb_publishable_5gwaAVv8762fM4KFlFPH9A_FM6o1-H6';
 const load=()=>new Promise((resolve,reject)=>{if(window.supabase?.createClient)return resolve();const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';s.onload=resolve;s.onerror=()=>reject(Error('Could not load Supabase library'));document.head.append(s)});
 let client,user,project,section='chapters',active=null,records=[],projects=[],timer=null,revision=0,saveBusy=false,chronicleReady=false,chapterDrafts={},writerNames={},liveLoop=null,liveTick=0;
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
-const ARCHIVE_RELEASE={version:'0.9.4',date:'2026-11-03',description:'Made update history a separate screen and fixed linked entry navigation with visible errors.'};
+const ARCHIVE_RELEASE={version:'0.9.5',date:'2026-11-03',description:'Permanent-ID link picker, tap diagnostics and unified World navigation.'};
 const ARCHIVE_HISTORY=[
  ARCHIVE_RELEASE,
+ {version:'0.9.4',date:'2026-11-03',description:'Separated update history and checked wiki destinations directly.'},
  {version:'0.9.3',date:'2026-11-03',description:'Added an in-app version and update history.'},
  {version:'0.9.2',date:'2026-11-03',description:'Fixed wiki links opening linked World entries.'},
  {version:'0.9.1',date:'2026-11-03',description:'Fixed realm search database query.'},
@@ -236,28 +237,73 @@ function wikiMarkup(value){
  }
  return result+esc(raw.slice(last));
 }
+let wikiOpenEpoch=0;
+function wikiNotice(message){
+ let host=document.getElementById('wikiNotice');
+ if(!host){
+  host=document.createElement('div');host.id='wikiNotice';host.setAttribute('role','status');
+  host.style.cssText='position:fixed;bottom:85px;left:12px;right:12px;max-width:550px;margin:auto;z-index:100;background:#292d22;color:#f4e5c9;border:1px solid #c3a46e;border-radius:9px;padding:12px;font:14px system-ui;box-shadow:0 4px 20px #0008';
+  root.append(host);
+ }
+ host.textContent=message;
+}
 async function openWiki(id,type){
- const dest=wikiSection(type);
- if(!dest){msg('Unsupported linked entry type');return}
- if(document.getElementById('editStatus')?.textContent==='Unsaved changes…'){msg('Wait for autosave');return}
- const realm=project?.id;
- clearTimeout(timer);worldEditing=false;chapterEditing=false;
- // Load the exact destination directly rather than relying on the current
- // list's selection state surviving a section change.
- const {data,error:e}=await client.from('archive_entries').select('*').eq('project_id',realm).eq('id',id).single();
- if(e||!data){msg('Cannot open linked entry: '+(e?.message||'not found'));return}
- if(project?.id!==realm)return;
- section=dest;active=data.id;
- await workspace();
- if(section!==dest||project?.id!==realm)return;
- active=data.id;
- if(!records.some(x=>x.id===data.id)){msg('Linked entry was not found in '+dest);return}
- drawEditor();
- root.scrollTop=0;
- scheduleScrollLayout();
+ const epoch=++wikiOpenEpoch,realm=project?.id;
+ wikiNotice('Link tapped. Looking up destination…');
+ if(document.getElementById('editStatus')?.textContent==='Unsaved changes…'){wikiNotice('Wait for autosave');return}
+ try{
+  const {data,error:e}=await client.from('archive_entries').select('*').eq('project_id',realm).eq('id',id).single();
+  if(epoch!==wikiOpenEpoch||project?.id!==realm)return;
+  if(e||!data){wikiNotice('Link lookup failed: '+(e?.message||'entry not found'));return}
+  const dest=wikiSection(data.entry_type);
+  if(!dest){wikiNotice('Unknown destination type: '+data.entry_type);return}
+  wikiNotice('Entry found. Opening '+data.name+'…');
+  clearTimeout(timer);worldEditing=false;chapterEditing=false;section=dest;active=data.id;
+  await workspace();
+  if(epoch!==wikiOpenEpoch||project?.id!==realm||section!==dest)return;
+  const target=records.find(x=>x.id===data.id);
+  if(!target){wikiNotice('Entry fetched, but missing from '+dest+' list');return}
+  active=target.id;drawEditor();root.scrollTop=0;scheduleScrollLayout();
+  document.getElementById('wikiNotice')?.remove();
+ }catch(e){wikiNotice('Navigation error: '+(e?.message||String(e)))}
 }
 function bindWiki(host){
- host.querySelectorAll('[data-wiki-id]').forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();openWiki(b.dataset.wikiId,b.dataset.wikiType)});
+ host.querySelectorAll('[data-wiki-id]').forEach(b=>b.onclick=e=>{
+  e.preventDefault();e.stopPropagation();openWiki(b.dataset.wikiId,b.dataset.wikiType);
+ });
+}
+function showWikiPicker(){
+ const editor=document.getElementById('editor');
+ if(!editor)return;
+ const fields=[...editor.querySelectorAll('textarea[data-edit],input[data-edit]')];
+ if(!fields.length)return;
+ let field=fields.find(x=>x===document.activeElement)||fields.find(x=>x.dataset.edit==='body'||x.dataset.edit==='description'||x.dataset.edit==='details'||x.dataset.edit==='notes')||fields[0];
+ const existing=document.getElementById('wikiPicker');if(existing){existing.remove();return}
+ const panel=document.createElement('div');panel.id='wikiPicker';
+ panel.style.cssText='border:1px solid #746b50;border-radius:8px;padding:12px;margin:12px 0;background:#22291f';
+ panel.innerHTML='<label for="wikiPickerField">Insert into field</label><select id="wikiPickerField">'+fields.map(x=>'<option value="'+esc(x.dataset.edit)+'" '+(x===field?'selected':'')+'>'+esc(x.dataset.edit)+'</option>').join('')+'</select><label for="wikiPickerQuery">Find an entry</label><input id="wikiPickerQuery" type="search" placeholder="Search names…"><div id="wikiPickerResults"></div>'+button('Cancel','wikiPickerCancel');
+ editor.insertBefore(panel,editor.querySelector('[data-edit]')?.previousElementSibling||editor.firstChild);
+ panel.querySelector('#wikiPickerCancel').onclick=()=>panel.remove();
+ const input=panel.querySelector('#wikiPickerQuery'),results=panel.querySelector('#wikiPickerResults');
+ const draw=()=>{
+  const q=input.value.trim().toLowerCase();
+  const matches=wikiIndex.filter(x=>!q||x.name.toLowerCase().includes(q)).slice(0,25);
+  results.innerHTML=matches.map(x=>'<button type="button" class="btn" style="display:block;width:100%;text-align:left;margin:5px 0" data-pick-id="'+esc(x.id)+'">'+esc(x.name)+' <small>('+esc(x.entry_type)+')</small></button>').join('')||'<p class="muted">No matches</p>';
+  results.querySelectorAll('[data-pick-id]').forEach(b=>b.onclick=()=>{
+   const entry=wikiIndex.find(x=>x.id===b.dataset.pickId);
+   const target=fields.find(x=>x.dataset.edit===panel.querySelector('#wikiPickerField').value);
+   if(!entry||!target)return;
+   const ref='[['+entry.id+'|'+entry.name+']]';
+   const start=target.selectionStart??target.value.length,end=target.selectionEnd??start;
+   target.value=target.value.slice(0,start)+ref+target.value.slice(end);
+   target.dispatchEvent(new Event('input',{bubbles:true}));
+   target.focus();target.setSelectionRange(start+ref.length,start+ref.length);
+   panel.remove();wikiNotice('Inserted permanent link to '+entry.name+'.');
+  });
+ };
+ input.oninput=draw;
+ loadWikiIndex().then(()=>{if(panel.isConnected)draw()});
+ draw();input.focus();
 }
 function showWikiResults(q){
  const host=document.getElementById('wikiResults');if(!host)return;
@@ -462,7 +508,7 @@ function drawChapterReader(r,el){
 }
 
 let worldEditing=false,chapterEditing=false;
-function drawEditor(){stopLive();const r=records.find(x=>x.id===active),el=document.getElementById('editor');root.classList.toggle('world-detail',worldSections.includes(section)&&!!r);root.classList.toggle('world-list',worldSections.includes(section)&&!r);root.classList.toggle('chapter-detail',section==='chapters'&&!!r);root.classList.toggle('chapter-list',section==='chapters'&&!r);root.classList.toggle('chapter-list',section==='chapters'&&!r);if(!el)return;if(!r){el.innerHTML=section==='chapters'?'':'<p class="muted">Create an entry to begin.</p>';return}if(section==='chapters'&&!chapterEditing){drawChapterReader(r,el);return}if(section!=='chapters'&&!worldEditing){drawWorldProfile(r,el);return}const cfg=configs[section];const vals={...r,...(r.fields||{})};el.innerHTML=(section!=='chapters'?'<div class="world-profile-bar">'+button('← Back','worldBack')+button('✓ Done','worldDone','gold')+'</div>':'<div class="chapter-edit-bar">'+button('← Back','chapterBack')+button('✓ Done','chapterDone','gold')+'</div>')+'<h2>'+esc(r.title||r.name)+'</h2>'+(section==='chapters'?'<div class="editor-tools">'+button('✒ Focus mode','focusToggle','gold')+'<span class="word-count" id="wordCount"></span></div>':'')+'<p class="muted">Changes save automatically to your private cloud project.</p>'+cfg.fields.map(([key,label])=>'<label for="field_'+key+'">'+label+'</label>'+(key==='body'||['description','personality','motivation','relationships','history','connections','notes','summary','details'].includes(key)?'<textarea class="'+(['body','details'].includes(key)?'long':'')+'" data-edit="'+key+'" id="field_'+key+'">'+esc(vals[key])+'</textarea>':'<input data-edit="'+key+'" id="field_'+key+'" value="'+esc(vals[key])+'">')).join('')+(section==='chapters'?'<p class="muted" id="chapterPresence">Checking other writers…</p><div class="actions" style="margin-top:12px">'+button('Revision history','chapterHistory')+button('Refresh chapter','refreshChapter')+'</div><div id="historyPanel"></div>':'')+(section==='characters'?'<section id="factionMembership" class="faction-membership"><p class="muted">Loading factions…</p></section>':'')+(section!=='chapters'?'<section class="link-section" id="worldLinks"><p class="muted">Loading connections…</p></section>':'')+'<div class="actions" style="margin-top:16px">'+button('Delete entry','deleteEntry')+'<span class="status" id="editStatus">Saved in cloud</span></div>';if(section!=='chapters'){document.getElementById('worldBack').onclick=()=>exitWorldProfile();document.getElementById('worldDone').onclick=()=>finishWorldEdit()}else{document.getElementById('chapterBack').onclick=()=>exitChapter();document.getElementById('chapterDone').onclick=()=>finishChapterEdit()}el.querySelectorAll('[data-edit]').forEach(input=>input.addEventListener('input',()=>{const current=records.find(x=>x.id===active);if(!current)return;const key=input.dataset.edit;const value=input.value;if(section==='chapters'||key==='name'||key==='category')current[key]=value;else current.fields={...(current.fields||{}),[key]:value};document.getElementById('editStatus').textContent='Unsaved changes…';clearTimeout(timer);const id=current.id;timer=setTimeout(()=>saveEntry(id),900)}));if(section==='characters')renderFactionMembership(r.id);if(section!=='chapters')renderWorldLinks(r.id);if(section==='chapters'){const count=()=>{const v=document.getElementById('field_body')?.value||'';const words=v.trim()?v.trim().split(/\s+/u).length:0;const el=document.getElementById('wordCount');if(el)el.textContent=words.toLocaleString()+' words'};count();document.getElementById('field_body').addEventListener('input',count);document.getElementById('focusToggle').onclick=()=>{const on=root.classList.toggle('focus-mode');document.getElementById('focusToggle').textContent=on?'✕ Exit':'✒ Focus mode';if(on)document.getElementById('field_body').focus()};loadWriterNames().then(()=>{updatePresence(r.id);readPresence(r.id);startLive('chapters')});document.getElementById('chapterHistory').onclick=()=>showChapterHistory(r.id);document.getElementById('refreshChapter').onclick=async()=>{if(document.getElementById('editStatus')?.textContent==='Unsaved changes…'&&!confirm('Discard unsaved changes and load the latest version?'))return;clearTimeout(timer);await loadEntries()}}document.getElementById('deleteEntry').onclick=()=>removeEntry(r.id)}
+function drawEditor(){stopLive();const r=records.find(x=>x.id===active),el=document.getElementById('editor');root.classList.toggle('world-detail',worldSections.includes(section)&&!!r);root.classList.toggle('world-list',worldSections.includes(section)&&!r);root.classList.toggle('chapter-detail',section==='chapters'&&!!r);root.classList.toggle('chapter-list',section==='chapters'&&!r);root.classList.toggle('chapter-list',section==='chapters'&&!r);if(!el)return;if(!r){el.innerHTML=section==='chapters'?'':'<p class="muted">Create an entry to begin.</p>';return}if(section==='chapters'&&!chapterEditing){drawChapterReader(r,el);return}if(section!=='chapters'&&!worldEditing){drawWorldProfile(r,el);return}const cfg=configs[section];const vals={...r,...(r.fields||{})};el.innerHTML=(section!=='chapters'?'<div class="world-profile-bar">'+button('← Back','worldBack')+button('✓ Done','worldDone','gold')+'</div>':'<div class="chapter-edit-bar">'+button('← Back','chapterBack')+button('✓ Done','chapterDone','gold')+'</div>')+'<h2>'+esc(r.title||r.name)+'</h2>'+(section==='chapters'?'<div class="editor-tools">'+button('✒ Focus mode','focusToggle','gold')+'<span class="word-count" id="wordCount"></span></div>':'')+'<p class="muted">Changes save automatically to your private cloud project.</p>'+'<div class="actions">'+button('🔗 Insert entry link','insertWikiLink')+'</div>'+cfg.fields.map(([key,label])=>'<label for="field_'+key+'">'+label+'</label>'+(key==='body'||['description','personality','motivation','relationships','history','connections','notes','summary','details'].includes(key)?'<textarea class="'+(['body','details'].includes(key)?'long':'')+'" data-edit="'+key+'" id="field_'+key+'">'+esc(vals[key])+'</textarea>':'<input data-edit="'+key+'" id="field_'+key+'" value="'+esc(vals[key])+'">')).join('')+(section==='chapters'?'<p class="muted" id="chapterPresence">Checking other writers…</p><div class="actions" style="margin-top:12px">'+button('Revision history','chapterHistory')+button('Refresh chapter','refreshChapter')+'</div><div id="historyPanel"></div>':'')+(section==='characters'?'<section id="factionMembership" class="faction-membership"><p class="muted">Loading factions…</p></section>':'')+(section!=='chapters'?'<section class="link-section" id="worldLinks"><p class="muted">Loading connections…</p></section>':'')+'<div class="actions" style="margin-top:16px">'+button('Delete entry','deleteEntry')+'<span class="status" id="editStatus">Saved in cloud</span></div>';if(section!=='chapters'){document.getElementById('worldBack').onclick=()=>exitWorldProfile();document.getElementById('worldDone').onclick=()=>finishWorldEdit()}else{document.getElementById('chapterBack').onclick=()=>exitChapter();document.getElementById('chapterDone').onclick=()=>finishChapterEdit()}document.getElementById('insertWikiLink').onclick=showWikiPicker;el.querySelectorAll('[data-edit]').forEach(input=>input.addEventListener('input',()=>{const current=records.find(x=>x.id===active);if(!current)return;const key=input.dataset.edit;const value=input.value;if(section==='chapters'||key==='name'||key==='category')current[key]=value;else current.fields={...(current.fields||{}),[key]:value};document.getElementById('editStatus').textContent='Unsaved changes…';clearTimeout(timer);const id=current.id;timer=setTimeout(()=>saveEntry(id),900)}));if(section==='characters')renderFactionMembership(r.id);if(section!=='chapters')renderWorldLinks(r.id);if(section==='chapters'){const count=()=>{const v=document.getElementById('field_body')?.value||'';const words=v.trim()?v.trim().split(/\s+/u).length:0;const el=document.getElementById('wordCount');if(el)el.textContent=words.toLocaleString()+' words'};count();document.getElementById('field_body').addEventListener('input',count);document.getElementById('focusToggle').onclick=()=>{const on=root.classList.toggle('focus-mode');document.getElementById('focusToggle').textContent=on?'✕ Exit':'✒ Focus mode';if(on)document.getElementById('field_body').focus()};loadWriterNames().then(()=>{updatePresence(r.id);readPresence(r.id);startLive('chapters')});document.getElementById('chapterHistory').onclick=()=>showChapterHistory(r.id);document.getElementById('refreshChapter').onclick=async()=>{if(document.getElementById('editStatus')?.textContent==='Unsaved changes…'&&!confirm('Discard unsaved changes and load the latest version?'))return;clearTimeout(timer);await loadEntries()}}document.getElementById('deleteEntry').onclick=()=>removeEntry(r.id)}
 async function saveEntry(id){
  const r=records.find(x=>x.id===id);if(!r)return;
  const status=document.getElementById('editStatus');
