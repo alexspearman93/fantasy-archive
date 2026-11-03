@@ -284,7 +284,15 @@ function updateWorldListSpacing(){
  const navHeight=nav&&getComputedStyle(nav).display!=='none'?nav.getBoundingClientRect().height:0;
  if(list.getBoundingClientRect().bottom>window.innerHeight-navHeight-12)root.classList.add('long-world-list');
 }
-function updateChapterListSpacing(){\n root.classList.remove('long-chapter-list');\n if(section!=='chapters'||active)return;\n const list=document.getElementById('entries');if(!list)return;\n const nav=document.querySelector('#cloudApp .mobile-nav');\n const navHeight=nav&&getComputedStyle(nav).display!=='none'?nav.getBoundingClientRect().height:0;\n if(list.getBoundingClientRect().bottom>window.innerHeight-navHeight-12)root.classList.add('long-chapter-list');\n}\nfunction exitChapter(){
+function updateChapterListSpacing(){
+ root.classList.remove('long-chapter-list');
+ if(section!=='chapters'||active)return;
+ const list=document.getElementById('entries');if(!list)return;
+ const nav=document.querySelector('#cloudApp .mobile-nav');
+ const navHeight=nav&&getComputedStyle(nav).display!=='none'?nav.getBoundingClientRect().height:0;
+ if(list.getBoundingClientRect().bottom>window.innerHeight-navHeight-12)root.classList.add('long-chapter-list');
+}
+function exitChapter(){
  if(document.getElementById('editStatus')?.textContent==='Unsaved changes…'){msg('Wait for autosave before leaving');return}
  root.classList.remove('focus-mode','chapter-detail');root.classList.add('chapter-list');chapterEditing=false;active=null;clearTimeout(timer);stopLive();
  const editor=document.getElementById('editor');if(editor)editor.innerHTML='<p class="muted">Choose a chapter or create one.</p>';
