@@ -154,6 +154,13 @@ html.archive-open,html.archive-open body{overflow:hidden!important;height:100%;o
 #cloudApp:not(.focus-mode) .wrap{height:auto;min-height:0!important;padding-bottom:0!important}
 #cloudApp:not(.focus-mode).needs-nav-clearance .wrap{padding-bottom:calc(92px + env(safe-area-inset-bottom))!important}
 #cloudApp:not(.focus-mode) .grid,#cloudApp:not(.focus-mode) .grid>aside{min-height:0}
+
+#cloudApp .wiki-search{margin:12px 0;padding:10px;background:#1a211a;border:1px solid #454a3d;border-radius:8px}
+#cloudApp .wiki-search input{width:100%;padding:11px;font-size:16px;background:#111710;color:#eee1cb;border:1px solid #77725b;border-radius:6px}
+#cloudApp #wikiResults button{display:block;width:100%;text-align:left;padding:10px;background:transparent;border:0;border-bottom:1px solid #41483b;color:#e8dcc7}
+#cloudApp #wikiResults small{color:#b4a88f}
+#cloudApp .wiki-link{font:inherit;color:#e4bd75;text-decoration:underline;background:none;border:0;padding:0;cursor:pointer}
+#cloudApp .wiki-missing{color:#b8aa94;border-bottom:1px dashed #817760}
 `;document.head.append(styles);
 const root=document.createElement('div');root.id='cloudApp';document.body.append(root);
 function updateWriterHeight(){root.style.setProperty('--writer-height',Math.round(window.visualViewport?.height||window.innerHeight)+'px')}
@@ -170,12 +177,66 @@ async function projectList(){frame('<div class="panel"><h2>Your Realms</h2><p cl
 const configs={chapters:{table:'chapters',title:'title',fields:[['title','Chapter title'],['body','Manuscript']]},characters:{type:'character',fields:[['name','Name'],['category','Role / title'],['description','Background'],['personality','Personality'],['motivation','Motivations'],['relationships','Relationships'],['notes','Notes']]},locations:{type:'location',fields:[['name','Name'],['category','Region'],['description','Description'],['history','History'],['connections','Connections'],['notes','Notes']]},factions:{type:'faction',fields:[['name','Faction name'],['category','Faction type'],['description','Overview'],['history','History'],['leadership','Leadership'],['goals','Goals and beliefs'],['headquarters','Headquarters'],['notes','Notes']]},lore:{type:'lore',fields:[['name','Name'],['category','Category'],['summary','Summary'],['details','Lore'],['connections','Connections'],['notes','Notes']]}};
 
 const worldSections=['characters','factions','locations','lore'];
+
+let wikiIndex=[],wikiRealm=null;
+const wikiSection=t=>({character:'characters',faction:'factions',location:'locations',lore:'lore'})[t];
+async function loadWikiIndex(){
+ if(!project)return;
+ const id=project.id;
+ const {data,error:e}=await client.from('archive_entries').select('id,name,entry_type,category,description,fields').eq('project_id',id).order('name');
+ if(e){msg('Search unavailable: '+e.message);return}
+ if(project?.id===id){wikiIndex=data||[];wikiRealm=id}
+}
+function wikiMarkup(value){
+ const raw=String(value||''),re=/\[\[([^\]\n]{1,180})\]\]/g;
+ let result='',last=0,m;
+ while((m=re.exec(raw))){
+  result+=esc(raw.slice(last,m.index));
+  const parts=m[1].split('|'),key=parts[0].trim(),label=(parts[1]||key).trim();
+  const entry=wikiIndex.find(e=>e.id===key)||wikiIndex.find(e=>e.name.toLowerCase()===key.toLowerCase());
+  result+=entry&&wikiSection(entry.entry_type)?'<button type="button" class="wiki-link" data-wiki-id="'+esc(entry.id)+'" data-wiki-type="'+esc(entry.entry_type)+'">'+esc(label)+'</button>':'<span class="wiki-missing">'+esc(label)+'</span>';
+  last=re.lastIndex;
+ }
+ return result+esc(raw.slice(last));
+}
+function openWiki(id,type){
+ const dest=wikiSection(type);if(!dest)return;
+ if(document.getElementById('editStatus')?.textContent==='Unsaved changes…'){msg('Wait for autosave');return}
+ clearTimeout(timer);worldEditing=false;chapterEditing=false;section=dest;active=id;workspace();
+}
+function bindWiki(host){
+ host.querySelectorAll('[data-wiki-id]').forEach(b=>b.onclick=()=>openWiki(b.dataset.wikiId,b.dataset.wikiType));
+}
+function showWikiResults(q){
+ const host=document.getElementById('wikiResults');if(!host)return;
+ q=q.trim().toLowerCase();
+ if(!q){host.innerHTML='<p class="muted">Search names, descriptions and notes throughout this realm.</p>';return}
+ const matches=wikiIndex.filter(e=>[e.name,e.category,e.description,...Object.values(e.fields||{}).map(v=>typeof v==='string'?v:'')].join(' ').toLowerCase().includes(q)).slice(0,50);
+ host.innerHTML=matches.length?matches.map(e=>'<button type="button" data-result-id="'+esc(e.id)+'" data-result-type="'+esc(e.entry_type)+'">'+esc(e.name)+' <small>('+esc(e.entry_type)+')</small></button>').join(''):'<p class="muted">No matches.</p>';
+ host.querySelectorAll('[data-result-id]').forEach(b=>b.onclick=()=>openWiki(b.dataset.resultId,b.dataset.resultType));
+}
+async function setupWikiSearch(){
+ const input=document.getElementById('wikiSearch');if(!input)return;
+ input.oninput=()=>showWikiResults(input.value);
+ if(wikiRealm!==project.id)wikiIndex=[];
+ showWikiResults('');
+ await loadWikiIndex();
+ if(input.isConnected)showWikiResults(input.value);
+}
+async function refreshWikiReader(id){
+ const realm=project?.id;
+ await loadWikiIndex();
+ if(project?.id!==realm||active!==id||!root.classList.contains('world-detail')||worldEditing)return;
+ const rec=records.find(x=>x.id===id),el=document.getElementById('editor');
+ if(rec&&el)drawWorldProfile(rec,el);
+}
+
 function navigate(dest){root.classList.remove('focus-mode');if(dest==='world')dest=worldSections.includes(section)?section:'characters';if(dest===section)return;root.classList.remove('world-detail','chapter-detail','chapter-list');worldEditing=false;chapterEditing=false;clearTimeout(timer);stopLive();section=dest;active=null;workspace()}
 function navigationUI(){
  const current=section==='chapters'?'chapters':worldSections.includes(section)?'world':section==='board'?'board':'';
  const items=[['chapters','▤','Manuscript'],['world','♜','World'],['board','☷','Council']];
  const links=items.map(([id,symbol,label])=>'<button type="button" data-destination="'+id+'" '+(current===id?'aria-current="page"':'')+'><span class="nav-symbol" aria-hidden="true">'+symbol+'</span>'+label+'</button>').join('');
- return '<div class="realm-head"><div><div class="muted">CURRENT REALM</div><h2>'+esc(project.name)+'</h2></div>'+button('⇄ Realms','back')+'</div><nav class="primary-nav" aria-label="Main navigation">'+items.map(([id,symbol,label])=>button(symbol+' '+label,'nav_'+id,current===id?'gold':'')).join('')+'</nav><nav class="mobile-nav" aria-label="Main navigation">'+links+'</nav>'+(worldSections.includes(section)?'<div class="world-nav">'+worldSections.map(k=>button(k[0].toUpperCase()+k.slice(1),'world_'+k,section===k?'gold':'')).join('')+'</div>':'');
+ return '<div class="realm-head"><div><div class="muted">CURRENT REALM</div><h2>'+esc(project.name)+'</h2></div>'+button('⇄ Realms','back')+'</div><nav class="primary-nav" aria-label="Main navigation">'+items.map(([id,symbol,label])=>button(symbol+' '+label,'nav_'+id,current===id?'gold':'')).join('')+'</nav><nav class="mobile-nav" aria-label="Main navigation">'+links+'</nav>'+(worldSections.includes(section)?'<div class="world-nav">'+worldSections.map(k=>button(k[0].toUpperCase()+k.slice(1),'world_'+k,section===k?'gold':'')).join('')+'</div><div class="wiki-search"><input type="search" id="wikiSearch" placeholder="⌕ Search this realm" aria-label="Search world entries"><div id="wikiResults"></div></div>':'');
 }
 function bindNavigation(){
  document.getElementById('back').onclick=()=>{clearTimeout(timer);stopLive();project=null;active=null;projectList()};
@@ -184,7 +245,7 @@ function bindNavigation(){
  for(const k of worldSections){const b=document.getElementById('world_'+k);if(b)b.onclick=()=>navigate(k)}
 }
 
-async function workspace(){root.classList.remove('focus-mode','world-detail','world-list','long-world-list','chapter-detail','chapter-list','long-chapter-list');stopLive();if(section==='profile')return profileView();if(section==='board')return boardView();if(section==='members')return membersView();if(section==='settings')return realmSettings();frame(navigationUI()+'<div class="grid"><aside class="panel"><div class="entry-heading"><h3>'+({chapters:'Chapters',characters:'Characters',factions:'Factions',locations:'Locations',lore:'Lore'}[section])+'</h3><div class="actions">'+button('＋ New','newEntry','gold')+button('▾','toggleEntries')+'</div></div><div id="entries" class="entry-list" style="margin-top:12px">Loading…</div></aside><div class="panel" id="editor">Choose an entry or create one.</div></div>');bindNavigation();document.getElementById('toggleEntries').onclick=()=>{const el=document.getElementById('entries');el.classList.toggle('collapsed');document.getElementById('toggleEntries').textContent=el.classList.contains('collapsed')?'▸':'▾'};document.getElementById('newEntry').onclick=()=>createEntry();await loadEntries()}
+async function workspace(){root.classList.remove('focus-mode','world-detail','world-list','long-world-list','chapter-detail','chapter-list','long-chapter-list');stopLive();if(section==='profile')return profileView();if(section==='board')return boardView();if(section==='members')return membersView();if(section==='settings')return realmSettings();frame(navigationUI()+'<div class="grid"><aside class="panel"><div class="entry-heading"><h3>'+({chapters:'Chapters',characters:'Characters',factions:'Factions',locations:'Locations',lore:'Lore'}[section])+'</h3><div class="actions">'+button('＋ New','newEntry','gold')+button('▾','toggleEntries')+'</div></div><div id="entries" class="entry-list" style="margin-top:12px">Loading…</div></aside><div class="panel" id="editor">Choose an entry or create one.</div></div>');bindNavigation();if(worldSections.includes(section))setupWikiSearch();document.getElementById('toggleEntries').onclick=()=>{const el=document.getElementById('entries');el.classList.toggle('collapsed');document.getElementById('toggleEntries').textContent=el.classList.contains('collapsed')?'▸':'▾'};document.getElementById('newEntry').onclick=()=>createEntry();await loadEntries()}
 async function loadEntries(){const cfg=configs[section];let q=client.from(cfg.table||'archive_entries').select('*').eq('project_id',project.id);if(cfg.type)q=q.eq('entry_type',cfg.type);let {data,error:e}=await q.order(section==='chapters'?'chapter_order':'updated_at',{ascending:section==='chapters'});if(e&&section==='chapters'&&(/chapter_order|does not exist|schema cache/i).test(e.message||'')){({data,error:e}=await client.from('chapters').select('*').eq('project_id',project.id).order('id',{ascending:true}));}if(e)return error(e);records=data||[];const list=document.getElementById('entries');if(!list)return;if(section==='characters'){
  const {data:factions,error:fe}=await client.from('archive_entries').select('id,name').eq('project_id',project.id).eq('entry_type','faction').order('name');
  if(fe)return error(fe);
@@ -265,13 +326,15 @@ function drawWorldProfile(r,el){
  root.classList.add('world-detail');
  const fields=cfg.fields.filter(([key])=>key!=='name').map(([key,label])=>{
   const value=String(vals[key]||'').trim();
-  return value?'<section class="world-read-section"><h3>'+esc(label)+'</h3><p>'+esc(value).replace(/\\n/g,'<br>')+'</p></section>':'';
+  return value?'<section class="world-read-section"><h3>'+esc(label)+'</h3><p>'+wikiMarkup(value).replace(/\\n/g,'<br>')+'</p></section>':'';
  }).join('');
  el.innerHTML='<div class="world-profile-bar">'+button('← Back','worldBack')+button('✎ Edit','worldEdit','gold')+'</div><h2 class="world-profile-title">'+esc(r.name)+'</h2>'+(fields||'<p class="muted">No details yet. Tap Edit to add some.</p>')+(section==='characters'?'<section id="factionMembership" class="faction-membership"><p class="muted">Loading factions…</p></section>':'')+'<section class="link-section" id="worldLinks"><p class="muted">Loading connections…</p></section>';
+ bindWiki(el);
  document.getElementById('worldBack').onclick=exitWorldProfile;
  document.getElementById('worldEdit').onclick=()=>{worldEditing=true;drawEditor()};
  if(section==='characters')renderFactionMembership(r.id,true);
  renderWorldLinks(r.id);
+ if(wikiRealm!==project?.id)refreshWikiReader(r.id);
 }
 
 
@@ -339,8 +402,9 @@ async function finishChapterEdit(){
 }
 function drawChapterReader(r,el){
  root.classList.add('chapter-detail');
- const body=esc(r.body||'');
+ const body=wikiMarkup(r.body||'');
  el.innerHTML='<div class="world-profile-bar">'+button('← Back','chapterBack')+button('✎ Edit','chapterEdit','gold')+'</div><article class="chapter-reader"><h1>'+esc(r.title||'Untitled Chapter')+'</h1><div class="chapter-prose">'+(body||'<p class="muted">This chapter is empty. Tap Edit to begin writing.</p>')+'</div></article>';
+ bindWiki(el);
  document.getElementById('chapterBack').onclick=exitChapter;
  document.getElementById('chapterEdit').onclick=()=>{chapterEditing=true;drawEditor()};
 }
