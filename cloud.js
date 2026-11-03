@@ -131,38 +131,27 @@ const styles=document.createElement('style');styles.textContent=`
 #cloudApp.chapter-list .entry-list .item{width:100%;text-align:left}
 @media(max-width:680px){#cloudApp.chapter-list .wrap{padding-left:12px;padding-right:12px}}
 
-/* Chapter index scrolls with the document, not inside a capped list. */
-#cloudApp.chapter-list .entry-list{max-height:none!important;height:auto!important;overflow:visible!important;display:block}
-#cloudApp.chapter-list .grid,#cloudApp.chapter-list .grid>aside{max-height:none!important;height:auto!important;overflow:visible!important}
-#cloudApp.chapter-list .wrap{min-height:100dvh;height:auto;overflow:visible;padding-bottom:calc(110px + env(safe-area-inset-bottom))}
+/* Chapter and World indices use the outer Cloud Archive scroller. */
+#cloudApp.chapter-list .entry-list,#cloudApp.world-list .entry-list{max-height:none!important;height:auto!important;overflow:visible!important}
 #cloudApp.chapter-list .entry-list.collapsed{display:block}
 #cloudApp.chapter-list #toggleEntries{display:none}
-
-/* Manuscript index: unboxed chapter rows and unrestricted document scrolling. */
-#cloudApp.chapter-list .entry-list .item{display:block;width:100%;margin:0;padding:17px 4px;border:0;border-bottom:1px solid #3b4339;border-radius:0;background:transparent;box-shadow:none;color:#eee1cb;font-size:1.05em}
+#cloudApp.chapter-list .grid,#cloudApp.chapter-list .grid>aside{max-height:none!important;height:auto!important;overflow:visible!important}
+#cloudApp.chapter-list .wrap{max-width:none;width:100%;padding-left:12px;padding-right:12px}
+#cloudApp.chapter-list .grid{display:block;width:100%;max-width:none;margin:0}
+#cloudApp.chapter-list .grid>aside{display:block;width:100%;padding:0!important;border:0;border-radius:0;box-shadow:none;background:transparent}
+#cloudApp.chapter-list #editor{display:none!important}
+#cloudApp.chapter-list .entry-heading{padding:8px 0 14px}
+#cloudApp.chapter-list .entry-list .item{display:block;width:100%;margin:0;padding:17px 4px;border:0;border-bottom:1px solid #3b4339;border-radius:0;background:transparent;box-shadow:none;color:#eee1cb;font-size:1.05em;text-align:left}
 #cloudApp.chapter-list .entry-list .item:first-child{border-top:1px solid #3b4339}
 #cloudApp.chapter-list .entry-list .item:active{background:#252b23}
-#cloudApp.chapter-list .grid>aside{padding:0!important}
-#cloudApp.chapter-list .entry-heading{padding:8px 0 14px}
-#cloudApp.chapter-list .wrap{padding-bottom:0!important;min-height:0!important}\n#cloudApp.chapter-list.long-chapter-list .wrap{padding-bottom:calc(110px + env(safe-area-inset-bottom))!important}
-#cloudApp.chapter-list .entry-list{overflow:visible!important;max-height:none!important;height:auto!important}
-#cloudApp.chapter-list .grid{overflow:visible!important}
-
-/* World index: eliminate phantom scroll while preserving long-list access. */
-#cloudApp.world-list .wrap{min-height:0!important;padding-bottom:0!important}
-#cloudApp.world-list.long-world-list .wrap{padding-bottom:calc(110px + env(safe-area-inset-bottom))!important}
 #cloudApp.world-list .grid{display:block;max-width:none;overflow:visible}
 #cloudApp.world-list .grid>aside{width:100%;max-height:none;overflow:visible}
 #cloudApp.world-list #editor{display:none}
-#cloudApp.world-list .entry-list{max-height:none!important;height:auto!important;overflow:visible!important}
-
-/* Unified app scrolling: one scroll container, no artificial overflow on short pages. */
+/* One viewport-bound scroll surface. Never force the page taller than its content. */
 #cloudApp{overflow-x:hidden;overflow-y:auto;overscroll-behavior-y:contain}
-#cloudApp:not(.focus-mode) .wrap{min-height:0!important;height:auto;padding-bottom:0!important}
+#cloudApp:not(.focus-mode) .wrap{height:auto;min-height:0!important;padding-bottom:0!important}
 #cloudApp:not(.focus-mode).needs-nav-clearance .wrap{padding-bottom:calc(92px + env(safe-area-inset-bottom))!important}
 #cloudApp:not(.focus-mode) .grid,#cloudApp:not(.focus-mode) .grid>aside{min-height:0}
-#cloudApp.chapter-list .entry-list,#cloudApp.world-list .entry-list{max-height:none!important;overflow:visible!important}
-#cloudApp.chapter-list.long-chapter-list .wrap,#cloudApp.world-list.long-world-list .wrap{padding-bottom:0!important}
 `;document.head.append(styles);
 const root=document.createElement('div');root.id='cloudApp';document.body.append(root);
 function updateWriterHeight(){root.style.setProperty('--writer-height',Math.round(window.visualViewport?.height||window.innerHeight)+'px')}
@@ -292,20 +281,35 @@ function scheduleScrollLayout(){
  scrollLayoutPending=true;
  requestAnimationFrame(()=>{
   scrollLayoutPending=false;
-  root.classList.remove('needs-nav-clearance','long-world-list','long-chapter-list');
-  if(root.classList.contains('focus-mode')||root.style.display==='none')return;
   const wrap=root.querySelector('.wrap'),nav=root.querySelector('.mobile-nav');
-  if(!wrap||!nav||getComputedStyle(nav).display==='none')return;
+  root.classList.remove('needs-nav-clearance');
+  if(!wrap||root.classList.contains('focus-mode')||root.style.display==='none'||!nav||getComputedStyle(nav).display==='none'){updateScrollDiagnostics();return}
   const navHeight=nav.getBoundingClientRect().height;
-  // Measure the natural document height without any artificial bottom spacer.
-  // Add clearance only when real content reaches the fixed bottom navigation.
-  const naturalHeight=wrap.getBoundingClientRect().bottom-root.getBoundingClientRect().top+root.scrollTop;
-  if(naturalHeight>root.clientHeight-navHeight+2)root.classList.add('needs-nav-clearance');
+  const contentBottom=wrap.getBoundingClientRect().bottom-root.getBoundingClientRect().top+root.scrollTop;
+  // A fixed navigation bar requires a bottom spacer only when real content
+  // extends into its area. Otherwise a short page must have zero scroll range.
+  if(contentBottom>root.clientHeight-navHeight+1)root.classList.add('needs-nav-clearance');
+  updateScrollDiagnostics();
  });
 }
 const scrollLayoutObserver=new MutationObserver(scheduleScrollLayout);
 scrollLayoutObserver.observe(root,{childList:true,subtree:true});
 window.addEventListener('resize',scheduleScrollLayout);
+// Optional on-device diagnostics: append &scrollDebug=1 to the page URL.
+// This displays measured overflow without exposing any manuscript content.
+let scrollDebugPanel=null;
+function updateScrollDiagnostics(){
+ if(!new URLSearchParams(location.search).has('scrollDebug'))return;
+ if(!scrollDebugPanel){
+  scrollDebugPanel=document.createElement('div');
+  scrollDebugPanel.style.cssText='position:fixed;z-index:10000;top:4px;right:4px;background:#111e;color:#f5d69b;border:1px solid #b39560;padding:5px;font:10px monospace;pointer-events:none;white-space:pre';
+  document.body.append(scrollDebugPanel);
+ }
+ const wrap=root.querySelector('.wrap');
+ scrollDebugPanel.textContent='cloud scroll '+root.scrollTop.toFixed(0)+' / '+Math.max(0,root.scrollHeight-root.clientHeight).toFixed(0)+'px\\nbody scroll '+(window.scrollY||0).toFixed(0)+' / '+Math.max(0,document.documentElement.scrollHeight-window.innerHeight).toFixed(0)+'px\\nwrap '+(wrap?.getBoundingClientRect().height.toFixed(0)||'-')+' / viewport '+root.clientHeight+'\\nnav clearance '+root.classList.contains('needs-nav-clearance');
+}
+root.addEventListener('scroll',updateScrollDiagnostics,{passive:true});
+window.addEventListener('scroll',updateScrollDiagnostics,{passive:true});
 function exitChapter(){
  if(document.getElementById('editStatus')?.textContent==='Unsaved changes…'){msg('Wait for autosave before leaving');return}
  root.classList.remove('focus-mode','chapter-detail');root.classList.add('chapter-list');chapterEditing=false;active=null;clearTimeout(timer);stopLive();
