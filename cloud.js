@@ -3,7 +3,7 @@
 const URL='https://pxyhvlvbzseikbcsgtsd.supabase.co';
 const KEY='sb_publishable_5gwaAVv8762fM4KFlFPH9A_FM6o1-H6';
 const load=()=>new Promise((resolve,reject)=>{if(window.supabase?.createClient)return resolve();const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';s.onload=resolve;s.onerror=()=>reject(Error('Could not load Supabase library'));document.head.append(s)});
-let client,user,project,section='chapters',active=null,records=[],projects=[],timer=null,revision=0;
+let client,user,project,section='chapters',active=null,records=[],projects=[],timer=null,revision=0,saveBusy=false,chronicleReady=false,chapterDrafts={};
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
 const styles=document.createElement('style');styles.textContent=`
 #cloudApp{position:fixed;inset:0;z-index:30;background:#111410;color:#e9e0ca;overflow:auto;font-family:Georgia,serif}
@@ -34,8 +34,49 @@ async function projectList(){frame('<div class="panel"><h2>Your Realms</h2><p cl
 const configs={chapters:{table:'chapters',title:'title',fields:[['title','Chapter title'],['body','Manuscript']]},characters:{type:'character',fields:[['name','Name'],['category','Role / title'],['description','Background'],['personality','Personality'],['motivation','Motivations'],['relationships','Relationships'],['notes','Notes']]},locations:{type:'location',fields:[['name','Name'],['category','Region'],['description','Description'],['history','History'],['connections','Connections'],['notes','Notes']]},lore:{type:'lore',fields:[['name','Name'],['category','Category'],['summary','Summary'],['details','Lore'],['connections','Connections'],['notes','Notes']]}};
 async function workspace(){if(section==='board')return boardView();if(section==='members')return membersView();if(section==='settings')return realmSettings();frame('<div class="actions">'+button('← Realms','back')+'<h2 style="margin:0">'+esc(project.name)+'</h2></div><div class="tabs">'+[...Object.keys(configs),'board','members','settings'].map(k=>button(({board:'Message Board',members:'Collaborators',settings:'Realm Settings'})[k]||k[0].toUpperCase()+k.slice(1),'tab_'+k,section===k?'gold':'')).join('')+'</div><div class="grid"><aside class="panel"><div class="actions" style="justify-content:space-between"><b>Entries</b>'+button('＋ New','newEntry','gold')+'</div><div id="entries" style="margin-top:14px">Loading…</div></aside><div class="panel" id="editor">Choose an entry or create one.</div></div>');document.getElementById('back').onclick=()=>{project=null;active=null;projectList()};[...Object.keys(configs),'board','members','settings'].forEach(k=>document.getElementById('tab_'+k).onclick=()=>{section=k;active=null;workspace()});document.getElementById('newEntry').onclick=()=>createEntry();await loadEntries()}
 async function loadEntries(){const cfg=configs[section];let q=client.from(cfg.table||'archive_entries').select('*').eq('project_id',project.id);if(cfg.type)q=q.eq('entry_type',cfg.type);const {data,error:e}=await q.order('updated_at',{ascending:false});if(e)return error(e);records=data||[];const list=document.getElementById('entries');if(!list)return;list.innerHTML=records.map(r=>'<button class="item '+(active===r.id?'on':'')+'" data-entry="'+esc(r.id)+'">'+esc(r.title||r.name)+'</button>').join('')||'<p class="muted">Nothing here yet.</p>';list.querySelectorAll('[data-entry]').forEach(b=>b.onclick=()=>{active=b.dataset.entry;drawEditor()});if(!records.some(r=>r.id===active))active=records[0]?.id||null;drawEditor()}
-function drawEditor(){const r=records.find(x=>x.id===active),el=document.getElementById('editor');if(!el)return;if(!r){el.innerHTML='<p class="muted">Create an entry to begin.</p>';return}const cfg=configs[section];const vals={...r,...(r.fields||{})};el.innerHTML='<h2>'+esc(r.title||r.name)+'</h2><p class="muted">Changes save automatically to your private cloud project.</p>'+cfg.fields.map(([key,label])=>'<label for="field_'+key+'">'+label+'</label>'+(key==='body'||['description','personality','motivation','relationships','history','connections','notes','summary','details'].includes(key)?'<textarea class="'+(['body','details'].includes(key)?'long':'')+'" data-edit="'+key+'" id="field_'+key+'">'+esc(vals[key])+'</textarea>':'<input data-edit="'+key+'" id="field_'+key+'" value="'+esc(vals[key])+'">')).join('')+'<div class="actions" style="margin-top:16px">'+button('Delete entry','deleteEntry')+'<span class="status" id="editStatus">Saved in cloud</span></div>';el.querySelectorAll('[data-edit]').forEach(input=>input.addEventListener('input',()=>{const current=records.find(x=>x.id===active);if(!current)return;const key=input.dataset.edit;const value=input.value;if(section==='chapters'||key==='name'||key==='category')current[key]=value;else current.fields={...(current.fields||{}),[key]:value};document.getElementById('editStatus').textContent='Unsaved changes…';clearTimeout(timer);const id=current.id;timer=setTimeout(()=>saveEntry(id),700)}));document.getElementById('deleteEntry').onclick=()=>removeEntry(r.id)}
-async function saveEntry(id){const r=records.find(x=>x.id===id);if(!r)return;const cfg=configs[section];const payload=section==='chapters'?{title:r.title,body:r.body}:{name:r.name,category:r.category,fields:r.fields};const {error:e}=await client.from(cfg.table||'archive_entries').update(payload).eq('id',id);const status=document.getElementById('editStatus');if(e){if(status)status.textContent='Save failed: '+e.message;return}if(status)status.textContent='Saved in cloud';const b=document.querySelector('[data-entry="'+id+'"]');if(b)b.textContent=r.title||r.name}
+function drawEditor(){const r=records.find(x=>x.id===active),el=document.getElementById('editor');if(!el)return;if(!r){el.innerHTML='<p class="muted">Create an entry to begin.</p>';return}const cfg=configs[section];const vals={...r,...(r.fields||{})};el.innerHTML='<h2>'+esc(r.title||r.name)+'</h2><p class="muted">Changes save automatically to your private cloud project.</p>'+cfg.fields.map(([key,label])=>'<label for="field_'+key+'">'+label+'</label>'+(key==='body'||['description','personality','motivation','relationships','history','connections','notes','summary','details'].includes(key)?'<textarea class="'+(['body','details'].includes(key)?'long':'')+'" data-edit="'+key+'" id="field_'+key+'">'+esc(vals[key])+'</textarea>':'<input data-edit="'+key+'" id="field_'+key+'" value="'+esc(vals[key])+'">')).join('')+(section==='chapters'?'<div class="actions" style="margin-top:12px">'+button('Revision history','chapterHistory')+button('Refresh chapter','refreshChapter')+'</div><div id="historyPanel"></div>':'')+'<div class="actions" style="margin-top:16px">'+button('Delete entry','deleteEntry')+'<span class="status" id="editStatus">Saved in cloud</span></div>';el.querySelectorAll('[data-edit]').forEach(input=>input.addEventListener('input',()=>{const current=records.find(x=>x.id===active);if(!current)return;const key=input.dataset.edit;const value=input.value;if(section==='chapters'||key==='name'||key==='category')current[key]=value;else current.fields={...(current.fields||{}),[key]:value};document.getElementById('editStatus').textContent='Unsaved changes…';clearTimeout(timer);const id=current.id;timer=setTimeout(()=>saveEntry(id),900)}));if(section==='chapters'){document.getElementById('chapterHistory').onclick=()=>showChapterHistory(r.id);document.getElementById('refreshChapter').onclick=async()=>{if(document.getElementById('editStatus')?.textContent==='Unsaved changes…'&&!confirm('Discard unsaved changes and load the latest version?'))return;clearTimeout(timer);await loadEntries()}}document.getElementById('deleteEntry').onclick=()=>removeEntry(r.id)}
+async function saveEntry(id){
+ const r=records.find(x=>x.id===id);if(!r)return;
+ const status=document.getElementById('editStatus');
+ if(section==='chapters'){
+  if(saveBusy){clearTimeout(timer);timer=setTimeout(()=>saveEntry(id),800);return}
+  saveBusy=true;
+  const title=r.title,body=r.body,expected=r.revision;
+  const {data,error:e}=await client.rpc('archive_save_chapter',{p_chapter:id,p_expected_revision:expected,p_title:title,p_body:body});
+  saveBusy=false;
+  if(e){
+   if(status)status.textContent=e.message.includes('CHAPTER_CONFLICT')?'Conflict! Copy your draft before refreshing.':('Save failed: '+e.message);
+   if(e.message.includes('CHAPTER_CONFLICT')){clearTimeout(timer);const panel=document.getElementById('historyPanel');if(panel)panel.innerHTML='<p style="color:#e4a477">Another writer saved a newer version. Your text is still in this editor. Copy it somewhere safe before refreshing. No changes were overwritten.</p>'}
+   return;
+  }
+  r.revision=data;
+  if(status)status.textContent=(r.title===title&&r.body===body)?'Saved · revision '+data:'Saving newer changes…';
+  const b=document.querySelector('[data-entry="'+id+'"]');if(b)b.textContent=r.title;
+  if(r.title!==title||r.body!==body){clearTimeout(timer);timer=setTimeout(()=>saveEntry(id),500)}
+  return;
+ }
+ const payload={name:r.name,category:r.category,fields:r.fields};
+ const {error:e}=await client.from('archive_entries').update(payload).eq('id',id);
+ if(e){if(status)status.textContent='Save failed: '+e.message;return}
+ if(status)status.textContent='Saved in cloud';
+ const b=document.querySelector('[data-entry="'+id+'"]');if(b)b.textContent=r.name;
+}
+async function showChapterHistory(id){
+ const panel=document.getElementById('historyPanel');if(!panel)return;
+ panel.innerHTML='<p class="muted">Loading previous versions…</p>';
+ const {data,error:e}=await client.from('chapter_revisions').select('revision,title,body,saved_at').eq('chapter_id',id).order('revision',{ascending:false}).limit(60);
+ if(e){panel.innerHTML='<p class="muted">Revision history unavailable: '+esc(e.message)+'</p>';return}
+ panel.innerHTML='<h3>Previous versions</h3><p class="muted">Every successful change preserves the preceding version. Restoring also creates a new revision.</p>'+
+ ((data||[]).length?(data||[]).map(v=>'<details style="border-top:1px solid #444;padding:10px 0"><summary>Revision '+v.revision+' · '+esc(prettyDate(v.saved_at))+' · '+esc(v.title)+'</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto">'+esc(v.body)+'</pre><button class="btn" data-restore="'+v.revision+'">Restore this version</button></details>').join(''):'<p class="muted">No earlier revisions yet. Make an edit and save to create one.</p>');
+ panel.querySelectorAll('[data-restore]').forEach(b=>b.onclick=async()=>{
+  const current=records.find(x=>x.id===id);if(!current)return;
+  if(!confirm('Restore revision '+b.dataset.restore+'? Your current saved version will remain in history. Unsaved text in the editor will be discarded.'))return;
+  clearTimeout(timer);
+  const {error:e}=await client.rpc('archive_restore_chapter',{p_chapter:id,p_expected_revision:current.revision,p_restore_revision:Number(b.dataset.restore)});
+  if(e)return error(e);
+  await loadEntries();msg('Earlier version restored');
+ });
+}
 async function createEntry(){const cfg=configs[section];const payload=section==='chapters'?{project_id:project.id,title:'Untitled Chapter',body:''}:{project_id:project.id,entry_type:cfg.type,name:'New '+cfg.type,category:'',fields:{}};const {data,error:e}=await client.from(cfg.table||'archive_entries').insert(payload).select().single();if(e)return error(e);active=data.id;await loadEntries()}
 async function removeEntry(id){if(!confirm('Delete this entry permanently?'))return;clearTimeout(timer);const cfg=configs[section];const {error:e}=await client.from(cfg.table||'archive_entries').delete().eq('id',id);if(e)return error(e);active=null;await loadEntries()}
 
