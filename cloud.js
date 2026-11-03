@@ -144,7 +144,7 @@ const styles=document.createElement('style');styles.textContent=`
 #cloudApp.chapter-list .entry-list .item:active{background:#252b23}
 #cloudApp.chapter-list .grid>aside{padding:0!important}
 #cloudApp.chapter-list .entry-heading{padding:8px 0 14px}
-#cloudApp.chapter-list .wrap{padding-bottom:calc(190px + env(safe-area-inset-bottom))!important;min-height:100dvh}
+#cloudApp.chapter-list .wrap{padding-bottom:0!important;min-height:0!important}\n#cloudApp.chapter-list.long-chapter-list .wrap{padding-bottom:calc(110px + env(safe-area-inset-bottom))!important}
 #cloudApp.chapter-list .entry-list{overflow:visible!important;max-height:none!important;height:auto!important}
 #cloudApp.chapter-list .grid{overflow:visible!important}
 `;document.head.append(styles);
@@ -184,7 +184,7 @@ async function loadEntries(){const cfg=configs[section];let q=client.from(cfg.ta
  const groups=[...(factions||[]).map(f=>({id:f.id,name:f.name,people:records.filter(r=>(r.fields?.faction_ids||[]).includes(f.id))})),{id:'none',name:'Unaffiliated',people:records.filter(r=>!(r.fields?.faction_ids||[]).length)}];
  const item=r=>'<button class="item '+(active===r.id?'on':'')+'" data-entry="'+esc(r.id)+'">'+esc(r.name)+'</button>';
  list.innerHTML=groups.filter(g=>g.people.length||g.id==='none').map(g=>'<details class="faction-group" open><summary>'+esc(g.name)+' ('+g.people.length+')</summary><div class="group-items">'+(g.people.map(item).join('')||'<p class="muted">No members yet.</p>')+'</div></details>').join('');
- }else list.innerHTML=records.map(r=>'<button class="item '+(active===r.id?'on':'')+'" data-entry="'+esc(r.id)+'">'+esc(r.title||r.name)+'</button>').join('')||'<p class="muted">Nothing here yet.</p>';list.querySelectorAll('[data-entry]').forEach(b=>b.onclick=()=>{active=b.dataset.entry;worldEditing=false;chapterEditing=false;drawEditor();if(section==='chapters')root.scrollTop=0;if(section==='chapters'){list.classList.remove('collapsed');const toggle=document.getElementById('toggleEntries');if(toggle)toggle.textContent='▾'}});if(!records.some(r=>r.id===active))active=null;drawEditor()}
+ }else list.innerHTML=records.map(r=>'<button class="item '+(active===r.id?'on':'')+'" data-entry="'+esc(r.id)+'">'+esc(r.title||r.name)+'</button>').join('')||'<p class="muted">Nothing here yet.</p>';list.querySelectorAll('[data-entry]').forEach(b=>b.onclick=()=>{active=b.dataset.entry;worldEditing=false;chapterEditing=false;drawEditor();if(section==='chapters')root.scrollTop=0;if(section==='chapters'){list.classList.remove('collapsed');const toggle=document.getElementById('toggleEntries');if(toggle)toggle.textContent='▾'}});if(!records.some(r=>r.id===active))active=null;drawEditor();updateChapterListSpacing()}
 
 // World relationships are stored separately from entry notes so they are reciprocal and navigable.
 let worldLinkEpoch=0;
@@ -268,7 +268,7 @@ function drawWorldProfile(r,el){
 }
 
 
-function exitChapter(){
+function updateChapterListSpacing(){\n root.classList.remove('long-chapter-list');\n if(section!=='chapters'||active)return;\n const list=document.getElementById('entries');if(!list)return;\n const nav=document.querySelector('#cloudApp .mobile-nav');\n const navHeight=nav&&getComputedStyle(nav).display!=='none'?nav.getBoundingClientRect().height:0;\n if(list.getBoundingClientRect().bottom>window.innerHeight-navHeight-12)root.classList.add('long-chapter-list');\n}\nfunction exitChapter(){
  if(document.getElementById('editStatus')?.textContent==='Unsaved changes…'){msg('Wait for autosave before leaving');return}
  root.classList.remove('focus-mode','chapter-detail');root.classList.add('chapter-list');chapterEditing=false;active=null;clearTimeout(timer);stopLive();
  const editor=document.getElementById('editor');if(editor)editor.innerHTML='<p class="muted">Choose a chapter or create one.</p>';
