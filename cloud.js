@@ -199,13 +199,26 @@ function wikiMarkup(value){
  }
  return result+esc(raw.slice(last));
 }
-function openWiki(id,type){
- const dest=wikiSection(type);if(!dest)return;
+async function openWiki(id,type){
+ const dest=wikiSection(type);
+ if(!dest){msg('This reference has an unsupported entry type');return}
  if(document.getElementById('editStatus')?.textContent==='Unsaved changes…'){msg('Wait for autosave');return}
- clearTimeout(timer);worldEditing=false;chapterEditing=false;section=dest;active=id;workspace();
+ clearTimeout(timer);worldEditing=false;chapterEditing=false;
+ section=dest;active=id;
+ try{
+  await workspace();
+  // A cross-section jump must preserve the destination selection after
+  // the async list finishes loading, and reveal the profile on mobile.
+  if(section!==dest)return;
+  const target=records.find(x=>String(x.id)===String(id));
+  if(!target){msg('Linked entry could not be found in '+dest);return}
+  active=target.id;
+  drawEditor();
+  root.scrollTop=0;
+ }catch(e){error(e)}
 }
 function bindWiki(host){
- host.querySelectorAll('[data-wiki-id]').forEach(b=>b.onclick=()=>openWiki(b.dataset.wikiId,b.dataset.wikiType));
+ host.querySelectorAll('[data-wiki-id]').forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();openWiki(b.dataset.wikiId,b.dataset.wikiType)});
 }
 function showWikiResults(q){
  const host=document.getElementById('wikiResults');if(!host)return;
