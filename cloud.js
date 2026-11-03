@@ -183,7 +183,7 @@ const wikiSection=t=>({character:'characters',faction:'factions',location:'locat
 async function loadWikiIndex(){
  if(!project)return;
  const id=project.id;
- const {data,error:e}=await client.from('archive_entries').select('id,name,entry_type,category,description,fields').eq('project_id',id).order('name');
+ const {data,error:e}=await client.from('archive_entries').select('id,name,entry_type,category,fields').eq('project_id',id).order('name');
  if(e){msg('Search unavailable: '+e.message);return}
  if(project?.id===id){wikiIndex=data||[];wikiRealm=id}
 }
