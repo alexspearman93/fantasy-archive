@@ -164,13 +164,14 @@ async function renderWorldLinks(entryId){
 }
 
 
-async function renderFactionMembership(id){
+async function renderFactionMembership(id,readOnly=false){
  const host=document.getElementById('factionMembership');if(!host)return;
  const {data,error:e}=await client.from('archive_entries').select('id,name').eq('project_id',project.id).eq('entry_type','faction').order('name');
  if(!host.isConnected||active!==id)return;
  if(e){host.textContent='Could not load factions: '+e.message;return}
  const r=records.find(x=>x.id===id);if(!r)return;
  const selected=r.fields?.faction_ids||[];
+ if(readOnly){const names=(data||[]).filter(f=>selected.includes(f.id)).map(f=>esc(f.name));host.innerHTML='<h3>Factions & groups</h3><p>'+(names.length?names.join(' · '):'<span class="muted">Unaffiliated</span>')+'</p>';return}
  host.innerHTML='<h3>Factions & groups</h3><p class="muted">A character can belong to multiple factions. Create or edit factions under World → Factions.</p>'+((data||[]).map(f=>'<label><input type="checkbox" data-faction="'+esc(f.id)+'" '+(selected.includes(f.id)?'checked':'')+'>'+esc(f.name)+'</label>').join('')||'<p class="muted">No factions yet. Open the Factions tab to create one.</p>');
  host.querySelectorAll('[data-faction]').forEach(box=>box.onchange=async()=>{
   const ids=[...host.querySelectorAll('[data-faction]:checked')].map(x=>x.dataset.faction);
@@ -206,7 +207,7 @@ function drawWorldProfile(r,el){
  el.innerHTML='<div class="world-profile-bar">'+button('← Back','worldBack')+button('✎ Edit','worldEdit','gold')+'</div><h2 class="world-profile-title">'+esc(r.name)+'</h2>'+(fields||'<p class="muted">No details yet. Tap Edit to add some.</p>')+(section==='characters'?'<section id="factionMembership" class="faction-membership"><p class="muted">Loading factions…</p></section>':'')+'<section class="link-section" id="worldLinks"><p class="muted">Loading connections…</p></section>';
  document.getElementById('worldBack').onclick=exitWorldProfile;
  document.getElementById('worldEdit').onclick=()=>{worldEditing=true;drawEditor()};
- if(section==='characters')renderFactionMembership(r.id);
+ if(section==='characters')renderFactionMembership(r.id,true);
  renderWorldLinks(r.id);
 }
 
