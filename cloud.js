@@ -5,9 +5,10 @@ const KEY='sb_publishable_5gwaAVv8762fM4KFlFPH9A_FM6o1-H6';
 const load=()=>new Promise((resolve,reject)=>{if(window.supabase?.createClient)return resolve();const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';s.onload=resolve;s.onerror=()=>reject(Error('Could not load Supabase library'));document.head.append(s)});
 let client,user,project,section='chapters',active=null,records=[],projects=[],timer=null,revision=0,saveBusy=false,chronicleReady=false,chapterDrafts={},writerNames={},liveLoop=null,liveTick=0;
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
-const ARCHIVE_RELEASE={version:'0.9.7',date:'2026-11-03',description:'Added review-before-apply Detect Links for manuscript and World text fields.'};
+const ARCHIVE_RELEASE={version:'0.9.8',date:'2026-11-03',description:'Added automatic manuscript backlinks and jump-to-mention navigation on World profiles.'};
 const ARCHIVE_HISTORY=[
  ARCHIVE_RELEASE,
+ {version:'0.9.7',date:'2026-11-03',description:'Added reviewed Detect Links for chapters and World entries.'},
  {version:'0.9.6',date:'2026-11-03',description:'Removed temporary wiki tap diagnostics.'},
  {version:'0.9.5',date:'2026-11-03',description:'Added permanent-ID link picker and tap diagnostics.'},
  {version:'0.9.4',date:'2026-11-03',description:'Separated update history and checked wiki destinations directly.'},
@@ -234,7 +235,7 @@ function wikiMarkup(value){
   result+=esc(raw.slice(last,m.index));
   const parts=m[1].split('|'),key=parts[0].trim(),label=(parts[1]||key).trim();
   const entry=wikiIndex.find(e=>e.id===key)||wikiIndex.find(e=>e.name.toLowerCase()===key.toLowerCase());
-  result+=entry&&wikiSection(entry.entry_type)?'<button type="button" class="wiki-link" data-wiki-id="'+esc(entry.id)+'" data-wiki-type="'+esc(entry.entry_type)+'">'+esc(label)+'</button>':'<span class="wiki-missing">'+esc(label)+'</span>';
+  result+=entry&&wikiSection(entry.entry_type)?'<button type="button" class="wiki-link" data-wiki-id="'+esc(entry.id)+'" data-wiki-type="'+esc(entry.entry_type)+'" data-reference-target="'+esc(entry.id)+'">'+esc(label)+'</button>':'<span class="wiki-missing">'+esc(label)+'</span>';
   last=re.lastIndex;
  }
  return result+esc(raw.slice(last));
@@ -498,6 +499,49 @@ async function finishWorldEdit(){
  if(document.getElementById('editStatus')?.textContent==='Unsaved changes…'){msg('Saving changes…');clearTimeout(timer);await saveEntry(active);if(document.getElementById('editStatus')?.textContent?.startsWith('Save failed'))return}
  worldEditing=false;drawEditor();
 }
+
+let referenceEpoch=0;
+function chapterMentions(body,entryId){
+ const matches=[],raw=String(body||''),re=/\[\[([^\]\n]{1,180})\]\]/g;let m;
+ while((m=re.exec(raw))){
+  const parts=m[1].split('|'),key=parts[0].trim();
+  if(key!==entryId)continue;
+  const start=Math.max(0,m.index-75),end=Math.min(raw.length,re.lastIndex+75);
+  const snippet=raw.slice(start,end).replace(/\[\[([^\]\n]+)\]\]/g,(_,inner)=>inner.split('|').slice(-1)[0]).replace(/\s+/g,' ').trim();
+  matches.push({ordinal:matches.length,snippet});
+ }
+ return matches;
+}
+async function renderReferences(entryId){
+ const host=document.getElementById('worldReferences');if(!host)return;
+ const epoch=++referenceEpoch,realm=project?.id;
+ const {data,error:e}=await client.from('chapters').select('id,title,body').eq('project_id',realm).order('chapter_order',{ascending:true});
+ if(epoch!==referenceEpoch||realm!==project?.id||active!==entryId||!host.isConnected)return;
+ if(e){host.innerHTML='<h3>Referenced In</h3><p class="muted">Could not load chapter references: '+esc(e.message)+'</p>';return}
+ const refs=[];
+ for(const chapter of data||[])for(const mention of chapterMentions(chapter.body,entryId))refs.push({...mention,chapterId:chapter.id,title:chapter.title||'Untitled Chapter'});
+ host.innerHTML='<h3>Referenced In <small class="muted">('+refs.length+')</small></h3>'+(refs.length?refs.map((ref,i)=>'<button type="button" class="btn" data-reference="'+i+'" style="display:block;width:100%;text-align:left;margin:8px 0"><strong>'+esc(ref.title)+'</strong><span class="muted" style="display:block;margin-top:5px">'+esc(ref.snippet)+'</span></button>').join(''):'<p class="muted">No linked mentions in manuscript chapters yet.</p>');
+ host.querySelectorAll('[data-reference]').forEach(button=>button.onclick=()=>openChapterReference(refs[Number(button.dataset.reference)],entryId));
+ scheduleScrollLayout();
+}
+async function openChapterReference(ref,entryId){
+ const realm=project?.id;
+ try{
+  const {data,error:e}=await client.from('chapters').select('*').eq('project_id',realm).eq('id',ref.chapterId).single();
+  if(e||!data||project?.id!==realm){msg('Could not open reference: '+(e?.message||'chapter missing'));return}
+  clearTimeout(timer);worldEditing=false;chapterEditing=false;section='chapters';active=data.id;
+  await workspace();
+  if(project?.id!==realm||section!=='chapters')return;
+  active=data.id;drawEditor();
+  const mentions=[...document.querySelectorAll('#editor .chapter-prose [data-reference-target]')].filter(el=>el.dataset.referenceTarget===entryId);
+  const target=mentions[ref.ordinal];
+  if(!target){msg('Chapter opened, but this mention has changed.');return}
+  target.style.cssText='background:#b39560;color:#141713;border-radius:4px;outline:3px solid #b39560';
+  target.scrollIntoView({block:'center',behavior:'smooth'});
+  scheduleScrollLayout();
+ }catch(e){msg('Reference navigation failed: '+(e?.message||String(e)))}
+}
+
 function drawWorldProfile(r,el){
  const cfg=configs[section],vals={...r,...(r.fields||{})};
  root.classList.add('world-detail');
@@ -505,12 +549,13 @@ function drawWorldProfile(r,el){
   const value=String(vals[key]||'').trim();
   return value?'<section class="world-read-section"><h3>'+esc(label)+'</h3><p>'+wikiMarkup(value).replace(/\\n/g,'<br>')+'</p></section>':'';
  }).join('');
- el.innerHTML='<div class="world-profile-bar">'+button('← Back','worldBack')+button('✎ Edit','worldEdit','gold')+'</div><h2 class="world-profile-title">'+esc(r.name)+'</h2>'+(fields||'<p class="muted">No details yet. Tap Edit to add some.</p>')+(section==='characters'?'<section id="factionMembership" class="faction-membership"><p class="muted">Loading factions…</p></section>':'')+'<section class="link-section" id="worldLinks"><p class="muted">Loading connections…</p></section>';
+ el.innerHTML='<div class="world-profile-bar">'+button('← Back','worldBack')+button('✎ Edit','worldEdit','gold')+'</div><h2 class="world-profile-title">'+esc(r.name)+'</h2>'+(fields||'<p class="muted">No details yet. Tap Edit to add some.</p>')+(section==='characters'?'<section id="factionMembership" class="faction-membership"><p class="muted">Loading factions…</p></section>':'')+'<section class="link-section" id="worldReferences"><h3>Referenced In</h3><p class="muted">Loading manuscript references…</p></section><section class="link-section" id="worldLinks"><p class="muted">Loading connections…</p></section>';
  bindWiki(el);
  document.getElementById('worldBack').onclick=exitWorldProfile;
  document.getElementById('worldEdit').onclick=()=>{worldEditing=true;drawEditor()};
  if(section==='characters')renderFactionMembership(r.id,true);
  renderWorldLinks(r.id);
+ renderReferences(r.id);
  if(wikiRealm!==project?.id)refreshWikiReader(r.id);
 }
 
