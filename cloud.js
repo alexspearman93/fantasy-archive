@@ -5,9 +5,10 @@ const KEY='sb_publishable_5gwaAVv8762fM4KFlFPH9A_FM6o1-H6';
 const load=()=>new Promise((resolve,reject)=>{if(window.supabase?.createClient)return resolve();const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';s.onload=resolve;s.onerror=()=>reject(Error('Could not load Supabase library'));document.head.append(s)});
 let client,user,project,section='chapters',active=null,records=[],projects=[],timer=null,revision=0,saveBusy=false,chronicleReady=false,chapterDrafts={},writerNames={},liveLoop=null,liveTick=0;
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
-const ARCHIVE_RELEASE={version:'0.9.3',date:'2026-11-03',description:'Added an in-app version and update history; improved wiki-link navigation.'};
+const ARCHIVE_RELEASE={version:'0.9.4',date:'2026-11-03',description:'Made update history a separate screen and fixed linked entry navigation with visible errors.'};
 const ARCHIVE_HISTORY=[
  ARCHIVE_RELEASE,
+ {version:'0.9.3',date:'2026-11-03',description:'Added an in-app version and update history.'},
  {version:'0.9.2',date:'2026-11-03',description:'Fixed wiki links opening linked World entries.'},
  {version:'0.9.1',date:'2026-11-03',description:'Fixed realm search database query.'},
  {version:'0.9.0',date:'2026-11-03',description:'Introduced realm-wide World search and wiki-style links.'},
@@ -187,18 +188,25 @@ const error=e=>{msg(e.message||String(e));console.error(e)};
 async function init(){root.innerHTML='<div class="wrap"><p>✦ Opening the cloud archive…</p></div>';try{await load();client=window.supabase.createClient(URL,KEY);const {data:{session}}=await client.auth.getSession();user=session?.user||null;client.auth.onAuthStateChange((_event,session)=>{const next=session?.user||null;if(next?.id!==user?.id){user=next;project=null;active=null;render()}});await render()}catch(e){root.innerHTML='<div class="wrap"><h2>Connection unavailable</h2><p>'+esc(e.message)+'</p>'+button('Try again','retry')+'</div>';document.getElementById('retry').onclick=init}}
 function frame(inner){root.classList.remove('focus-mode');root.innerHTML='<div class="wrap"><div class="bar"><div><h1>✦ THE FANTASY ARCHIVE</h1><div class="muted">The Scriptorium</div></div>'+(user?'<details class="account-menu"><summary aria-label="Account menu">☰ Menu</summary><div class="account-options">'+button('My Profile','accountProfile')+button('Collaborators','accountMembers')+button('Realm Settings','accountSettings')+button('Switch realm','accountRealms')+button('About / Updates','accountUpdates')+button('Sign out','signout')+'</div></details>':button('Local prototype','local'))+'</div>'+inner+'<p class="status" id="cloudStatus" role="status"></p></div>';if(user){document.getElementById('signout').onclick=async()=>{stopLive();await client.auth.signOut();user=null;project=null;render()};for(const [id,dest] of [['accountProfile','profile'],['accountMembers','members'],['accountSettings','settings']])document.getElementById(id).onclick=()=>project?navigate(dest):msg('Open a realm first');document.getElementById('accountRealms').onclick=()=>{stopLive();project=null;active=null;projectList()};document.getElementById('accountUpdates').onclick=showArchiveUpdates}else document.getElementById('local').onclick=()=>{root.style.display='none';document.documentElement.classList.remove('archive-open');document.getElementById('cloudLaunch').hidden=false}}
 function showArchiveUpdates(){
- const old=root.querySelector('#archiveUpdates');
- if(old){old.remove();return}
- const wrap=root.querySelector('.wrap');
- if(!wrap)return;
- const host=document.createElement('section');
- host.id='archiveUpdates';host.className='release-history';
+ if(document.getElementById('archiveUpdatesScreen'))return;
+ const wrap=root.querySelector('.wrap');if(!wrap)return;
+ const previous=wrap.innerHTML;
+ const previousClasses=root.className;
+ root.classList.remove('world-detail','world-list','chapter-detail','chapter-list');
  const stamp=ARCHIVE_LOADED_AT.toLocaleString();
- host.innerHTML='<h2>About Fantasy Archive</h2><p class="release-current">Running version '+esc(ARCHIVE_RELEASE.version)+'</p><p class="muted">Release date: '+esc(ARCHIVE_RELEASE.date)+' · Loaded on this device: '+esc(stamp)+'</p><p class="muted">This version is reported by the JavaScript currently running on your device. A release date is not a guarantee that GitHub Pages has finished deploying.</p>'+button('Close','closeArchiveUpdates')+'<h3>Update history</h3>'+ARCHIVE_HISTORY.map((entry,i)=>'<article><strong>'+esc(entry.version)+'</strong> <span class="muted">'+esc(entry.date)+(i===0?' · Current':'')+'</span><p>'+esc(entry.description)+'</p></article>').join('');
- wrap.insertBefore(host,wrap.children[1]||null);
- host.querySelector('#closeArchiveUpdates').onclick=()=>host.remove();
- root.scrollTop=0;
- scheduleScrollLayout();
+ const content='<section class="release-history" id="archiveUpdates"><h2>About Fantasy Archive</h2><p class="release-current">Running version '+esc(ARCHIVE_RELEASE.version)+'</p><p class="muted">Release date: '+esc(ARCHIVE_RELEASE.date)+' · Loaded on this device: '+esc(stamp)+'</p><p class="muted">This version is reported by the JavaScript currently running on your device.</p>'+button('← Back to Archive','closeArchiveUpdates')+'<h3>Update history</h3>'+ARCHIVE_HISTORY.map((entry,i)=>'<article><strong>'+esc(entry.version)+'</strong> <span class="muted">'+esc(entry.date)+(i===0?' · Current':'')+'</span><p>'+esc(entry.description)+'</p></article>').join('')+'</section>';
+ // Keep the original workspace mounted but hidden, so restoring it does not
+ // destroy active editing state or its event handlers.
+ const holder=document.createElement('div');holder.id='archiveUpdatesScreen';holder.innerHTML=content;
+ Array.from(wrap.children).forEach(child=>{child.hidden=true;child.style.display='none'});
+ wrap.append(holder);
+ holder.querySelector('#closeArchiveUpdates').onclick=()=>{
+  holder.remove();
+  Array.from(wrap.children).forEach(child=>{child.hidden=false;child.style.removeProperty('display')});
+  root.className=previousClasses;
+  scheduleScrollLayout();
+ };
+ root.scrollTop=0;scheduleScrollLayout();
 }
 async function render(){if(!user)return auth();if(!project)return projectList();return workspace()}
 function auth(){frame('<div class="panel auth"><h2>Enter the Archive</h2><p class="muted">Sign in or create an account. Email confirmation may be required.</p><form id="authForm"><label>Email</label><input id="email" type="email" autocomplete="email" required><label>Password</label><input id="password" type="password" minlength="6" autocomplete="current-password" required><div class="actions" style="margin-top:18px">'+button('Sign in','login','gold')+button('Create account','signup')+'</div></form></div>');const submit=async(signup)=>{const email=document.getElementById('email').value.trim(),password=document.getElementById('password').value;if(!email||!password)return msg('Enter an email and password');msg('Contacting Supabase…');try{const {data,error:e}=signup?await client.auth.signUp({email,password,options:{emailRedirectTo:location.origin+location.pathname}}):await client.auth.signInWithPassword({email,password});if(e)throw e;if(data.session){user=data.user;render()}else msg('Check your email for a confirmation link, then sign in.')}catch(e){error(e)}};document.getElementById('authForm').onsubmit=e=>{e.preventDefault();submit(false)};document.getElementById('signup').onclick=e=>{e.preventDefault();submit(true)}}
@@ -230,21 +238,23 @@ function wikiMarkup(value){
 }
 async function openWiki(id,type){
  const dest=wikiSection(type);
- if(!dest){msg('This reference has an unsupported entry type');return}
+ if(!dest){msg('Unsupported linked entry type');return}
  if(document.getElementById('editStatus')?.textContent==='Unsaved changes…'){msg('Wait for autosave');return}
+ const realm=project?.id;
  clearTimeout(timer);worldEditing=false;chapterEditing=false;
- section=dest;active=id;
- try{
-  await workspace();
-  // A cross-section jump must preserve the destination selection after
-  // the async list finishes loading, and reveal the profile on mobile.
-  if(section!==dest)return;
-  const target=records.find(x=>String(x.id)===String(id));
-  if(!target){msg('Linked entry could not be found in '+dest);return}
-  active=target.id;
-  drawEditor();
-  root.scrollTop=0;
- }catch(e){error(e)}
+ // Load the exact destination directly rather than relying on the current
+ // list's selection state surviving a section change.
+ const {data,error:e}=await client.from('archive_entries').select('*').eq('project_id',realm).eq('id',id).single();
+ if(e||!data){msg('Cannot open linked entry: '+(e?.message||'not found'));return}
+ if(project?.id!==realm)return;
+ section=dest;active=data.id;
+ await workspace();
+ if(section!==dest||project?.id!==realm)return;
+ active=data.id;
+ if(!records.some(x=>x.id===data.id)){msg('Linked entry was not found in '+dest);return}
+ drawEditor();
+ root.scrollTop=0;
+ scheduleScrollLayout();
 }
 function bindWiki(host){
  host.querySelectorAll('[data-wiki-id]').forEach(b=>b.onclick=e=>{e.preventDefault();e.stopPropagation();openWiki(b.dataset.wikiId,b.dataset.wikiType)});
