@@ -130,6 +130,13 @@ const styles=document.createElement('style');styles.textContent=`
 #cloudApp.chapter-list .entry-list{width:100%;max-width:none}
 #cloudApp.chapter-list .entry-list .item{width:100%;text-align:left}
 @media(max-width:680px){#cloudApp.chapter-list .wrap{padding-left:12px;padding-right:12px}}
+
+/* Chapter index scrolls with the document, not inside a capped list. */
+#cloudApp.chapter-list .entry-list{max-height:none!important;height:auto!important;overflow:visible!important;display:block}
+#cloudApp.chapter-list .grid,#cloudApp.chapter-list .grid>aside{max-height:none!important;height:auto!important;overflow:visible!important}
+#cloudApp.chapter-list .wrap{min-height:100dvh;height:auto;overflow:visible;padding-bottom:calc(110px + env(safe-area-inset-bottom))}
+#cloudApp.chapter-list .entry-list.collapsed{display:block}
+#cloudApp.chapter-list #toggleEntries{display:none}
 `;document.head.append(styles);
 const root=document.createElement('div');root.id='cloudApp';document.body.append(root);
 function updateWriterHeight(){root.style.setProperty('--writer-height',Math.round(window.visualViewport?.height||window.innerHeight)+'px')}
