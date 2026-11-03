@@ -81,8 +81,14 @@ const styles=document.createElement('style');styles.textContent=`
  #cloudApp.focus-mode #field_body{min-height:calc(100dvh - 128px);padding:10px 8px;font-size:17px;line-height:1.7}
  #cloudApp.focus-mode #field_title{font-size:19px}
 }
+
+#cloudApp.focus-mode #field_body{height:calc(var(--writer-height,100dvh) - 145px);min-height:180px;overflow-y:auto;-webkit-overflow-scrolling:touch;resize:none;scroll-padding-bottom:60px}
+@media(max-width:680px){#cloudApp.focus-mode #field_body{height:calc(var(--writer-height,100dvh) - 125px);min-height:160px}}
 `;document.head.append(styles);
 const root=document.createElement('div');root.id='cloudApp';document.body.append(root);
+function updateWriterHeight(){root.style.setProperty('--writer-height',Math.round(window.visualViewport?.height||window.innerHeight)+'px')}
+updateWriterHeight();window.addEventListener('resize',updateWriterHeight);window.visualViewport?.addEventListener('resize',updateWriterHeight);
+
 const msg=(t)=>{const x=document.getElementById('cloudStatus');if(x)x.textContent=t};
 const button=(label,id,extra='')=>'<button class="btn '+extra+'" id="'+id+'">'+label+'</button>';
 const error=e=>{msg(e.message||String(e));console.error(e)};
