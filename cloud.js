@@ -5,9 +5,10 @@ const KEY='sb_publishable_5gwaAVv8762fM4KFlFPH9A_FM6o1-H6';
 const load=()=>new Promise((resolve,reject)=>{if(window.supabase?.createClient)return resolve();const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';s.onload=resolve;s.onerror=()=>reject(Error('Could not load Supabase library'));document.head.append(s)});
 let client,user,project,section='chapters',active=null,records=[],projects=[],timer=null,revision=0,saveBusy=false,chronicleReady=false,chapterDrafts={},writerNames={},liveLoop=null,liveTick=0;
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
-const ARCHIVE_RELEASE={version:'0.9.6',date:'2026-11-03',description:'Removed temporary wiki tap diagnostics; retained permanent-ID links and error reporting.'};
+const ARCHIVE_RELEASE={version:'0.9.7',date:'2026-11-03',description:'Added review-before-apply Detect Links for manuscript and World text fields.'};
 const ARCHIVE_HISTORY=[
  ARCHIVE_RELEASE,
+ {version:'0.9.6',date:'2026-11-03',description:'Removed temporary wiki tap diagnostics.'},
  {version:'0.9.5',date:'2026-11-03',description:'Added permanent-ID link picker and tap diagnostics.'},
  {version:'0.9.4',date:'2026-11-03',description:'Separated update history and checked wiki destinations directly.'},
  {version:'0.9.3',date:'2026-11-03',description:'Added an in-app version and update history.'},
@@ -262,6 +263,94 @@ function bindWiki(host){
   e.preventDefault();e.stopPropagation();openWiki(b.dataset.wikiId,b.dataset.wikiType);
  });
 }
+
+function detectLinkCandidates(value,entries){
+ const raw=String(value||''), protectedRanges=[];
+ const linkPattern=/\[\[[^\]\n]*\]\]/g;let m;
+ while((m=linkPattern.exec(raw)))protectedRanges.push([m.index,linkPattern.lastIndex]);
+ const byName=new Map();
+ for(const e of entries){
+  const name=String(e.name||'').trim();
+  if(name.length<3||!wikiSection(e.entry_type))continue;
+  const key=name.toLocaleLowerCase();
+  if(!byName.has(key))byName.set(key,[]);
+  byName.get(key).push(e);
+ }
+ const names=[...byName.keys()].sort((a,b)=>b.length-a.length);
+ const candidates=[];
+ for(let i=0;i<raw.length;){
+  const protectedAt=protectedRanges.find(([start,end])=>i>=start&&i<end);
+  if(protectedAt){i=protectedAt[1];continue}
+  let match=null;
+  for(const key of names){
+   if(raw.slice(i,i+key.length).toLocaleLowerCase()!==key)continue;
+   const end=i+key.length;
+   if(protectedRanges.some(([start,stop])=>i<stop&&end>start))continue;
+   const before=raw[i-1]||'',after=raw[end]||'';
+   if(/[\p{L}\p{N}_]/u.test(before)||/[\p{L}\p{N}_]/u.test(after))continue;
+   match={start:i,end,label:raw.slice(i,end),options:byName.get(key)};
+   break;
+  }
+  if(match){candidates.push(match);i=match.end}else i++;
+ }
+ return candidates;
+}
+async function showDetectLinks(){
+ const editor=document.getElementById('editor');if(!editor)return;
+ const existing=document.getElementById('detectLinksPanel');if(existing){existing.remove();return}
+ const fields=[...editor.querySelectorAll('textarea[data-edit]')];
+ if(!fields.length){msg('No text fields available for link detection.');return}
+ const panel=document.createElement('section');panel.id='detectLinksPanel';
+ panel.style.cssText='border:1px solid #746b50;border-radius:8px;padding:12px;margin:12px 0;background:#22291f';
+ panel.innerHTML='<h3>Detect entry links</h3><p class="muted">Review matches before converting them to permanent-ID links. Existing links are left alone.</p><div id="detectLinksResults">Scanning…</div><div class="actions" style="margin-top:12px">'+button('Apply selected links','detectLinksApply','gold')+button('Cancel','detectLinksCancel')+'</div>';
+ const insertButton=editor.querySelector('#detectWikiLinks');
+ editor.insertBefore(panel,insertButton?.parentElement?.nextSibling||editor.firstChild);
+ panel.querySelector('#detectLinksCancel').onclick=()=>panel.remove();
+ const realm=project?.id,entry=active;
+ await loadWikiIndex();
+ if(!panel.isConnected||project?.id!==realm||active!==entry)return;
+ const candidates=[];
+ for(const field of fields){
+  for(const match of detectLinkCandidates(field.value,wikiIndex)){
+   if(match.options.every(x=>x.id===entry))continue;
+   candidates.push({...match,field,original:field.value,options:match.options.filter(x=>x.id!==entry)});
+  }
+ }
+ const results=panel.querySelector('#detectLinksResults');
+ if(!candidates.length){
+  results.innerHTML='<p class="muted">No unlinked entry names found in text fields.</p>';
+  panel.querySelector('#detectLinksApply').disabled=true;return;
+ }
+ results.innerHTML='<p class="muted">'+candidates.length+' possible mention(s) found. Ambiguous names require choosing an entry.</p>'+candidates.map((c,i)=>{
+  const excerpt=c.original.slice(Math.max(0,c.start-35),Math.min(c.original.length,c.end+35)).replace(/\s+/g,' ');
+  return '<div style="border-bottom:1px solid #41483b;padding:9px 0"><label style="display:flex;gap:9px;align-items:center"><input type="checkbox" data-detect-check="'+i+'" '+(c.options.length===1?'checked':'')+'><span><strong>'+esc(c.label)+'</strong> <small class="muted">in '+esc(c.field.dataset.edit)+'</small></span></label><p class="muted">'+esc(excerpt)+'</p>'+(c.options.length>1?'<select data-detect-choice="'+i+'"><option value="">Choose matching entry…</option>'+c.options.map(x=>'<option value="'+esc(x.id)+'">'+esc(x.name)+' ('+esc(x.entry_type)+')</option>').join('')+'</select>':'')+'</div>';
+ }).join('');
+ panel.querySelector('#detectLinksApply').onclick=()=>{
+  // Prevent stale offsets from modifying a draft edited while the review was open.
+  if(fields.some(field=>candidates.some(c=>c.field===field&&c.original!==field.value))){
+   msg('Text changed during review. Run Detect Links again.');panel.remove();return;
+  }
+  const selected=[];
+  for(let i=0;i<candidates.length;i++){
+   const check=panel.querySelector('[data-detect-check="'+i+'"]');
+   if(!check?.checked)continue;
+   const c=candidates[i],choice=panel.querySelector('[data-detect-choice="'+i+'"]');
+   const chosen=choice?c.options.find(x=>x.id===choice.value):c.options[0];
+   if(!chosen){msg('Choose an entry for each checked ambiguous name.');return}
+   selected.push({...c,chosen});
+  }
+  if(!selected.length){msg('Select at least one mention.');return}
+  const affected=new Set(selected.map(c=>c.field));
+  for(const field of affected){
+   const changes=selected.filter(c=>c.field===field).sort((a,b)=>b.start-a.start);
+   let value=field.value;
+   for(const c of changes)value=value.slice(0,c.start)+'[['+c.chosen.id+'|'+c.label+']]'+value.slice(c.end);
+   field.value=value;field.dispatchEvent(new Event('input',{bubbles:true}));
+  }
+  panel.remove();msg('Inserted '+selected.length+' permanent link(s). Autosaving…');
+ };
+}
+
 function showWikiPicker(){
  const editor=document.getElementById('editor');
  if(!editor)return;
@@ -498,7 +587,7 @@ function drawChapterReader(r,el){
 }
 
 let worldEditing=false,chapterEditing=false;
-function drawEditor(){stopLive();const r=records.find(x=>x.id===active),el=document.getElementById('editor');root.classList.toggle('world-detail',worldSections.includes(section)&&!!r);root.classList.toggle('world-list',worldSections.includes(section)&&!r);root.classList.toggle('chapter-detail',section==='chapters'&&!!r);root.classList.toggle('chapter-list',section==='chapters'&&!r);root.classList.toggle('chapter-list',section==='chapters'&&!r);if(!el)return;if(!r){el.innerHTML=section==='chapters'?'':'<p class="muted">Create an entry to begin.</p>';return}if(section==='chapters'&&!chapterEditing){drawChapterReader(r,el);return}if(section!=='chapters'&&!worldEditing){drawWorldProfile(r,el);return}const cfg=configs[section];const vals={...r,...(r.fields||{})};el.innerHTML=(section!=='chapters'?'<div class="world-profile-bar">'+button('← Back','worldBack')+button('✓ Done','worldDone','gold')+'</div>':'<div class="chapter-edit-bar">'+button('← Back','chapterBack')+button('✓ Done','chapterDone','gold')+'</div>')+'<h2>'+esc(r.title||r.name)+'</h2>'+(section==='chapters'?'<div class="editor-tools">'+button('✒ Focus mode','focusToggle','gold')+'<span class="word-count" id="wordCount"></span></div>':'')+'<p class="muted">Changes save automatically to your private cloud project.</p>'+'<div class="actions">'+button('🔗 Insert entry link','insertWikiLink')+'</div>'+cfg.fields.map(([key,label])=>'<label for="field_'+key+'">'+label+'</label>'+(key==='body'||['description','personality','motivation','relationships','history','connections','notes','summary','details'].includes(key)?'<textarea class="'+(['body','details'].includes(key)?'long':'')+'" data-edit="'+key+'" id="field_'+key+'">'+esc(vals[key])+'</textarea>':'<input data-edit="'+key+'" id="field_'+key+'" value="'+esc(vals[key])+'">')).join('')+(section==='chapters'?'<p class="muted" id="chapterPresence">Checking other writers…</p><div class="actions" style="margin-top:12px">'+button('Revision history','chapterHistory')+button('Refresh chapter','refreshChapter')+'</div><div id="historyPanel"></div>':'')+(section==='characters'?'<section id="factionMembership" class="faction-membership"><p class="muted">Loading factions…</p></section>':'')+(section!=='chapters'?'<section class="link-section" id="worldLinks"><p class="muted">Loading connections…</p></section>':'')+'<div class="actions" style="margin-top:16px">'+button('Delete entry','deleteEntry')+'<span class="status" id="editStatus">Saved in cloud</span></div>';if(section!=='chapters'){document.getElementById('worldBack').onclick=()=>exitWorldProfile();document.getElementById('worldDone').onclick=()=>finishWorldEdit()}else{document.getElementById('chapterBack').onclick=()=>exitChapter();document.getElementById('chapterDone').onclick=()=>finishChapterEdit()}document.getElementById('insertWikiLink').onclick=showWikiPicker;el.querySelectorAll('[data-edit]').forEach(input=>input.addEventListener('input',()=>{const current=records.find(x=>x.id===active);if(!current)return;const key=input.dataset.edit;const value=input.value;if(section==='chapters'||key==='name'||key==='category')current[key]=value;else current.fields={...(current.fields||{}),[key]:value};document.getElementById('editStatus').textContent='Unsaved changes…';clearTimeout(timer);const id=current.id;timer=setTimeout(()=>saveEntry(id),900)}));if(section==='characters')renderFactionMembership(r.id);if(section!=='chapters')renderWorldLinks(r.id);if(section==='chapters'){const count=()=>{const v=document.getElementById('field_body')?.value||'';const words=v.trim()?v.trim().split(/\s+/u).length:0;const el=document.getElementById('wordCount');if(el)el.textContent=words.toLocaleString()+' words'};count();document.getElementById('field_body').addEventListener('input',count);document.getElementById('focusToggle').onclick=()=>{const on=root.classList.toggle('focus-mode');document.getElementById('focusToggle').textContent=on?'✕ Exit':'✒ Focus mode';if(on)document.getElementById('field_body').focus()};loadWriterNames().then(()=>{updatePresence(r.id);readPresence(r.id);startLive('chapters')});document.getElementById('chapterHistory').onclick=()=>showChapterHistory(r.id);document.getElementById('refreshChapter').onclick=async()=>{if(document.getElementById('editStatus')?.textContent==='Unsaved changes…'&&!confirm('Discard unsaved changes and load the latest version?'))return;clearTimeout(timer);await loadEntries()}}document.getElementById('deleteEntry').onclick=()=>removeEntry(r.id)}
+function drawEditor(){stopLive();const r=records.find(x=>x.id===active),el=document.getElementById('editor');root.classList.toggle('world-detail',worldSections.includes(section)&&!!r);root.classList.toggle('world-list',worldSections.includes(section)&&!r);root.classList.toggle('chapter-detail',section==='chapters'&&!!r);root.classList.toggle('chapter-list',section==='chapters'&&!r);root.classList.toggle('chapter-list',section==='chapters'&&!r);if(!el)return;if(!r){el.innerHTML=section==='chapters'?'':'<p class="muted">Create an entry to begin.</p>';return}if(section==='chapters'&&!chapterEditing){drawChapterReader(r,el);return}if(section!=='chapters'&&!worldEditing){drawWorldProfile(r,el);return}const cfg=configs[section];const vals={...r,...(r.fields||{})};el.innerHTML=(section!=='chapters'?'<div class="world-profile-bar">'+button('← Back','worldBack')+button('✓ Done','worldDone','gold')+'</div>':'<div class="chapter-edit-bar">'+button('← Back','chapterBack')+button('✓ Done','chapterDone','gold')+'</div>')+'<h2>'+esc(r.title||r.name)+'</h2>'+(section==='chapters'?'<div class="editor-tools">'+button('✒ Focus mode','focusToggle','gold')+'<span class="word-count" id="wordCount"></span></div>':'')+'<p class="muted">Changes save automatically to your private cloud project.</p>'+'<div class="actions">'+button('🔗 Insert entry link','insertWikiLink')+button('⌕ Detect links','detectWikiLinks')+'</div>'+cfg.fields.map(([key,label])=>'<label for="field_'+key+'">'+label+'</label>'+(key==='body'||['description','personality','motivation','relationships','history','connections','notes','summary','details'].includes(key)?'<textarea class="'+(['body','details'].includes(key)?'long':'')+'" data-edit="'+key+'" id="field_'+key+'">'+esc(vals[key])+'</textarea>':'<input data-edit="'+key+'" id="field_'+key+'" value="'+esc(vals[key])+'">')).join('')+(section==='chapters'?'<p class="muted" id="chapterPresence">Checking other writers…</p><div class="actions" style="margin-top:12px">'+button('Revision history','chapterHistory')+button('Refresh chapter','refreshChapter')+'</div><div id="historyPanel"></div>':'')+(section==='characters'?'<section id="factionMembership" class="faction-membership"><p class="muted">Loading factions…</p></section>':'')+(section!=='chapters'?'<section class="link-section" id="worldLinks"><p class="muted">Loading connections…</p></section>':'')+'<div class="actions" style="margin-top:16px">'+button('Delete entry','deleteEntry')+'<span class="status" id="editStatus">Saved in cloud</span></div>';if(section!=='chapters'){document.getElementById('worldBack').onclick=()=>exitWorldProfile();document.getElementById('worldDone').onclick=()=>finishWorldEdit()}else{document.getElementById('chapterBack').onclick=()=>exitChapter();document.getElementById('chapterDone').onclick=()=>finishChapterEdit()}document.getElementById('insertWikiLink').onclick=showWikiPicker;document.getElementById('detectWikiLinks').onclick=showDetectLinks;el.querySelectorAll('[data-edit]').forEach(input=>input.addEventListener('input',()=>{const current=records.find(x=>x.id===active);if(!current)return;const key=input.dataset.edit;const value=input.value;if(section==='chapters'||key==='name'||key==='category')current[key]=value;else current.fields={...(current.fields||{}),[key]:value};document.getElementById('editStatus').textContent='Unsaved changes…';clearTimeout(timer);const id=current.id;timer=setTimeout(()=>saveEntry(id),900)}));if(section==='characters')renderFactionMembership(r.id);if(section!=='chapters')renderWorldLinks(r.id);if(section==='chapters'){const count=()=>{const v=document.getElementById('field_body')?.value||'';const words=v.trim()?v.trim().split(/\s+/u).length:0;const el=document.getElementById('wordCount');if(el)el.textContent=words.toLocaleString()+' words'};count();document.getElementById('field_body').addEventListener('input',count);document.getElementById('focusToggle').onclick=()=>{const on=root.classList.toggle('focus-mode');document.getElementById('focusToggle').textContent=on?'✕ Exit':'✒ Focus mode';if(on)document.getElementById('field_body').focus()};loadWriterNames().then(()=>{updatePresence(r.id);readPresence(r.id);startLive('chapters')});document.getElementById('chapterHistory').onclick=()=>showChapterHistory(r.id);document.getElementById('refreshChapter').onclick=async()=>{if(document.getElementById('editStatus')?.textContent==='Unsaved changes…'&&!confirm('Discard unsaved changes and load the latest version?'))return;clearTimeout(timer);await loadEntries()}}document.getElementById('deleteEntry').onclick=()=>removeEntry(r.id)}
 async function saveEntry(id){
  const r=records.find(x=>x.id===id);if(!r)return;
  const status=document.getElementById('editStatus');
