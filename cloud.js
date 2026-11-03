@@ -173,11 +173,12 @@ async function renderFactionMembership(id){
  host.querySelectorAll('[data-faction]').forEach(box=>box.onchange=async()=>{
   const ids=[...host.querySelectorAll('[data-faction]:checked')].map(x=>x.dataset.faction);
   const updated={...(r.fields||{}),faction_ids:ids};
+  if(document.getElementById('editStatus')?.textContent==='Unsaved changes…'){box.checked=!box.checked;msg('Wait for your notes to autosave, then change faction membership');return}
   box.disabled=true;
   const {error:saveError}=await client.from('archive_entries').update({fields:updated}).eq('id',id).eq('project_id',project.id);
   box.disabled=false;
   if(saveError){box.checked=!box.checked;return error(saveError)}
-  r.fields=updated;msg('Faction membership saved');
+  r.fields=updated;msg('Faction membership saved. Reopen Characters to see updated groups.');
  });
 }
 
