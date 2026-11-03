@@ -5,9 +5,10 @@ const KEY='sb_publishable_5gwaAVv8762fM4KFlFPH9A_FM6o1-H6';
 const load=()=>new Promise((resolve,reject)=>{if(window.supabase?.createClient)return resolve();const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';s.onload=resolve;s.onerror=()=>reject(Error('Could not load Supabase library'));document.head.append(s)});
 let client,user,project,section='chapters',active=null,records=[],projects=[],timer=null,revision=0,saveBusy=false,chronicleReady=false,chapterDrafts={},writerNames={},liveLoop=null,liveTick=0;
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
-const ARCHIVE_RELEASE={version:'0.9.5',date:'2026-11-03',description:'Permanent-ID link picker, tap diagnostics and unified World navigation.'};
+const ARCHIVE_RELEASE={version:'0.9.6',date:'2026-11-03',description:'Removed temporary wiki tap diagnostics; retained permanent-ID links and error reporting.'};
 const ARCHIVE_HISTORY=[
  ARCHIVE_RELEASE,
+ {version:'0.9.5',date:'2026-11-03',description:'Added permanent-ID link picker and tap diagnostics.'},
  {version:'0.9.4',date:'2026-11-03',description:'Separated update history and checked wiki destinations directly.'},
  {version:'0.9.3',date:'2026-11-03',description:'Added an in-app version and update history.'},
  {version:'0.9.2',date:'2026-11-03',description:'Fixed wiki links opening linked World entries.'},
@@ -238,34 +239,23 @@ function wikiMarkup(value){
  return result+esc(raw.slice(last));
 }
 let wikiOpenEpoch=0;
-function wikiNotice(message){
- let host=document.getElementById('wikiNotice');
- if(!host){
-  host=document.createElement('div');host.id='wikiNotice';host.setAttribute('role','status');
-  host.style.cssText='position:fixed;bottom:85px;left:12px;right:12px;max-width:550px;margin:auto;z-index:100;background:#292d22;color:#f4e5c9;border:1px solid #c3a46e;border-radius:9px;padding:12px;font:14px system-ui;box-shadow:0 4px 20px #0008';
-  root.append(host);
- }
- host.textContent=message;
-}
 async function openWiki(id,type){
  const epoch=++wikiOpenEpoch,realm=project?.id;
- wikiNotice('Link tapped. Looking up destination…');
- if(document.getElementById('editStatus')?.textContent==='Unsaved changes…'){wikiNotice('Wait for autosave');return}
+ if(document.getElementById('editStatus')?.textContent==='Unsaved changes…'){msg('Wait for autosave');return}
  try{
   const {data,error:e}=await client.from('archive_entries').select('*').eq('project_id',realm).eq('id',id).single();
   if(epoch!==wikiOpenEpoch||project?.id!==realm)return;
-  if(e||!data){wikiNotice('Link lookup failed: '+(e?.message||'entry not found'));return}
+  if(e||!data){msg('Link lookup failed: '+(e?.message||'entry not found'));return}
   const dest=wikiSection(data.entry_type);
-  if(!dest){wikiNotice('Unknown destination type: '+data.entry_type);return}
-  wikiNotice('Entry found. Opening '+data.name+'…');
+  if(!dest){msg('Unknown destination type: '+data.entry_type);return}
+  msg('Entry found. Opening '+data.name+'…');
   clearTimeout(timer);worldEditing=false;chapterEditing=false;section=dest;active=data.id;
   await workspace();
   if(epoch!==wikiOpenEpoch||project?.id!==realm||section!==dest)return;
   const target=records.find(x=>x.id===data.id);
-  if(!target){wikiNotice('Entry fetched, but missing from '+dest+' list');return}
+  if(!target){msg('Entry fetched, but missing from '+dest+' list');return}
   active=target.id;drawEditor();root.scrollTop=0;scheduleScrollLayout();
-  document.getElementById('wikiNotice')?.remove();
- }catch(e){wikiNotice('Navigation error: '+(e?.message||String(e)))}
+ }catch(e){msg('Navigation error: '+(e?.message||String(e)))}
 }
 function bindWiki(host){
  host.querySelectorAll('[data-wiki-id]').forEach(b=>b.onclick=e=>{
@@ -298,7 +288,7 @@ function showWikiPicker(){
    target.value=target.value.slice(0,start)+ref+target.value.slice(end);
    target.dispatchEvent(new Event('input',{bubbles:true}));
    target.focus();target.setSelectionRange(start+ref.length,start+ref.length);
-   panel.remove();wikiNotice('Inserted permanent link to '+entry.name+'.');
+   panel.remove();
   });
  };
  input.oninput=draw;
