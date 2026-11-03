@@ -240,7 +240,7 @@ async function finishChapterEdit(){
 }
 function drawChapterReader(r,el){
  root.classList.add('chapter-detail');
- const body=esc(r.body||'').replace(/\\n/g,'<br>');
+ const body=esc(r.body||'');
  el.innerHTML='<div class="world-profile-bar">'+button('← Back','chapterBack')+button('✎ Edit','chapterEdit','gold')+'</div><article class="chapter-reader"><h1>'+esc(r.title||'Untitled Chapter')+'</h1><div class="chapter-prose">'+(body||'<p class="muted">This chapter is empty. Tap Edit to begin writing.</p>')+'</div></article>';
  document.getElementById('chapterBack').onclick=exitChapter;
  document.getElementById('chapterEdit').onclick=()=>{chapterEditing=true;drawEditor()};
