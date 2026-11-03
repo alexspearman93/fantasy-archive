@@ -137,6 +137,16 @@ const styles=document.createElement('style');styles.textContent=`
 #cloudApp.chapter-list .wrap{min-height:100dvh;height:auto;overflow:visible;padding-bottom:calc(110px + env(safe-area-inset-bottom))}
 #cloudApp.chapter-list .entry-list.collapsed{display:block}
 #cloudApp.chapter-list #toggleEntries{display:none}
+
+/* Manuscript index: unboxed chapter rows and unrestricted document scrolling. */
+#cloudApp.chapter-list .entry-list .item{display:block;width:100%;margin:0;padding:17px 4px;border:0;border-bottom:1px solid #3b4339;border-radius:0;background:transparent;box-shadow:none;color:#eee1cb;font-size:1.05em}
+#cloudApp.chapter-list .entry-list .item:first-child{border-top:1px solid #3b4339}
+#cloudApp.chapter-list .entry-list .item:active{background:#252b23}
+#cloudApp.chapter-list .grid>aside{padding:0!important}
+#cloudApp.chapter-list .entry-heading{padding:8px 0 14px}
+#cloudApp.chapter-list .wrap{padding-bottom:calc(190px + env(safe-area-inset-bottom))!important;min-height:100dvh}
+#cloudApp.chapter-list .entry-list{overflow:visible!important;max-height:none!important;height:auto!important}
+#cloudApp.chapter-list .grid{overflow:visible!important}
 `;document.head.append(styles);
 const root=document.createElement('div');root.id='cloudApp';document.body.append(root);
 function updateWriterHeight(){root.style.setProperty('--writer-height',Math.round(window.visualViewport?.height||window.innerHeight)+'px')}
