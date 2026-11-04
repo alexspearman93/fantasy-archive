@@ -5,9 +5,10 @@ const KEY='sb_publishable_5gwaAVv8762fM4KFlFPH9A_FM6o1-H6';
 const load=()=>new Promise((resolve,reject)=>{if(window.supabase?.createClient)return resolve();const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';s.onload=resolve;s.onerror=()=>reject(Error('Could not load Supabase library'));document.head.append(s)});
 let client,user,project,section='chapters',active=null,records=[],projects=[],timer=null,revision=0,saveBusy=false,chronicleReady=false,chapterDrafts={},writerNames={},liveLoop=null,liveTick=0;
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
-const ARCHIVE_RELEASE={version:'0.9.10',date:'2026-11-03',description:'Made World navigation wrap into accessible rows on phones.'};
+const ARCHIVE_RELEASE={version:'0.9.11',date:'2026-11-03',description:'Prepared installable Fantasy Archive PWA with Home Screen support.'};
 const ARCHIVE_HISTORY=[
  ARCHIVE_RELEASE,
+ {version:'0.9.10',date:'2026-11-03',description:'Made World navigation wrap into accessible rows on phones.'},
  {version:'0.9.9',date:'2026-11-03',description:'Added a simple master Chronicle timeline for each realm.'},
  {version:'0.9.8',date:'2026-11-03',description:'Added automatic manuscript backlinks.'},
  {version:'0.9.7',date:'2026-11-03',description:'Added reviewed Detect Links for chapters and World entries.'},
