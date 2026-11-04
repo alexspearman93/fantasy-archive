@@ -5,9 +5,10 @@ const KEY='sb_publishable_5gwaAVv8762fM4KFlFPH9A_FM6o1-H6';
 const load=()=>new Promise((resolve,reject)=>{if(window.supabase?.createClient)return resolve();const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';s.onload=resolve;s.onerror=()=>reject(Error('Could not load Supabase library'));document.head.append(s)});
 let client,user,project,section='chapters',active=null,records=[],projects=[],timer=null,revision=0,saveBusy=false,chronicleReady=false,chapterDrafts={},writerNames={},liveLoop=null,liveTick=0;
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
-const ARCHIVE_RELEASE={version:'0.9.9',date:'2026-11-03',description:'Added a simple master Chronicle timeline for each realm.'};
+const ARCHIVE_RELEASE={version:'0.9.10',date:'2026-11-03',description:'Made World navigation wrap into accessible rows on phones.'};
 const ARCHIVE_HISTORY=[
  ARCHIVE_RELEASE,
+ {version:'0.9.9',date:'2026-11-03',description:'Added a simple master Chronicle timeline for each realm.'},
  {version:'0.9.8',date:'2026-11-03',description:'Added automatic manuscript backlinks.'},
  {version:'0.9.7',date:'2026-11-03',description:'Added reviewed Detect Links for chapters and World entries.'},
  {version:'0.9.6',date:'2026-11-03',description:'Removed temporary wiki tap diagnostics.'},
@@ -42,7 +43,8 @@ const styles=document.createElement('style');styles.textContent=`
 #cloudApp .primary-nav{display:flex;gap:8px;margin:12px 0 18px}
 #cloudApp .primary-nav button{flex:1}
 #cloudApp .world-nav{display:flex;gap:8px;margin:0 0 16px}
-#cloudApp .world-nav button{flex:1}
+#cloudApp .world-nav button{flex:1;min-width:0}
+@media(max-width:680px){#cloudApp .world-nav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}#cloudApp .world-nav button{width:100%;padding:10px 5px;font-size:13px;white-space:normal}}
 #cloudApp .account-menu{position:relative}
 #cloudApp .account-menu summary{cursor:pointer;list-style:none;border:1px solid #635941;background:#282c24;border-radius:7px;padding:10px 13px;font:14px system-ui}
 #cloudApp .account-menu summary::-webkit-details-marker{display:none}
