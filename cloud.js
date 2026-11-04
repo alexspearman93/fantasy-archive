@@ -194,6 +194,7 @@ html.archive-open,html.archive-open body{overflow:hidden!important;height:100%;o
 #cloudApp .release-history article p{margin:5px 0;line-height:1.55}
 #cloudApp .release-history .release-current{color:#e3c38a}
 
+#cloudApp .council-dot[hidden]{display:none!important}
 #cloudApp .council-dot{display:inline-block;width:6px;height:6px;margin-left:7px;vertical-align:middle;border-radius:50%;background:#bda06a;box-shadow:0 0 0 1px #bda06a33}
 #cloudApp .council-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
 #cloudApp .council-head h2{margin:0;font-size:22px}
