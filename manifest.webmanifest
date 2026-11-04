@@ -1,0 +1,19 @@
+{
+  "id": "/fantasy-archive/",
+  "name": "Fantasy Archive",
+  "short_name": "Archive",
+  "description": "A collaborative home for manuscripts, worlds, and stories.",
+  "start_url": "/fantasy-archive/",
+  "scope": "/fantasy-archive/",
+  "display": "standalone",
+  "background_color": "#121411",
+  "theme_color": "#121411",
+  "icons": [
+    {
+      "src": "./archive-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
