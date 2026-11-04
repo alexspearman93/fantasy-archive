@@ -5,9 +5,10 @@ const KEY='sb_publishable_5gwaAVv8762fM4KFlFPH9A_FM6o1-H6';
 const load=()=>new Promise((resolve,reject)=>{if(window.supabase?.createClient)return resolve();const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';s.onload=resolve;s.onerror=()=>reject(Error('Could not load Supabase library'));document.head.append(s)});
 let client,user,project,section='chapters',active=null,records=[],projects=[],timer=null,revision=0,saveBusy=false,chronicleReady=false,chapterDrafts={},writerNames={},liveLoop=null,liveTick=0;
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
-const ARCHIVE_RELEASE={version:'0.9.8',date:'2026-11-03',description:'Added automatic manuscript backlinks and jump-to-mention navigation on World profiles.'};
+const ARCHIVE_RELEASE={version:'0.9.9',date:'2026-11-03',description:'Added a simple master Chronicle timeline for each realm.'};
 const ARCHIVE_HISTORY=[
  ARCHIVE_RELEASE,
+ {version:'0.9.8',date:'2026-11-03',description:'Added automatic manuscript backlinks.'},
  {version:'0.9.7',date:'2026-11-03',description:'Added reviewed Detect Links for chapters and World entries.'},
  {version:'0.9.6',date:'2026-11-03',description:'Removed temporary wiki tap diagnostics.'},
  {version:'0.9.5',date:'2026-11-03',description:'Added permanent-ID link picker and tap diagnostics.'},
@@ -410,20 +411,50 @@ async function refreshWikiReader(id){
 }
 
 function navigate(dest){root.classList.remove('focus-mode');if(dest==='world')dest=worldSections.includes(section)?section:'characters';if(dest===section)return;root.classList.remove('world-detail','chapter-detail','chapter-list');worldEditing=false;chapterEditing=false;clearTimeout(timer);stopLive();section=dest;active=null;workspace()}
+
+async function chronicleView(){
+ frame(navigationUI()+'<section class="panel"><div class="entry-heading"><h2>The Chronicle</h2>'+button('＋ Event','addEvent','gold')+'</div><p class="muted">One timeline for this realm. Undated events stay at the end.</p><div id="chronicleItems">Loading…</div><div id="chronicleEdit"></div></section>');
+ bindNavigation();
+ document.getElementById('addEvent').onclick=()=>editChronicle();
+ const realm=project.id;
+ const [events,entries]=await Promise.all([client.from('chronicle_events').select('*').eq('project_id',realm).order('event_year',{ascending:true,nullsFirst:false}),client.from('archive_entries').select('id,name,entry_type').eq('project_id',realm).order('name')]);
+ if(project?.id!==realm||section!=='chronicle')return;
+ if(events.error){document.getElementById('chronicleItems').textContent='Timeline unavailable: '+events.error.message;return}
+ const list=events.data||[],world=entries.data||[];
+ document.getElementById('chronicleItems').innerHTML=list.length?list.map(e=>'<article class="panel" style="margin:10px 0"><button class="btn" data-event="'+esc(e.id)+'"><span class="muted">'+(e.event_year===null?'Undated':(e.approximate?'~ ':'')+esc(e.event_year)+(e.era_label?' '+esc(e.era_label):''))+'</span> · '+esc(e.title)+'</button><p>'+esc(e.description)+'</p>'+((e.related_entry_ids||[]).map(id=>world.find(w=>w.id===id)).filter(Boolean).map(w=>'<button class="wiki-link" data-world="'+esc(w.id)+'" data-type="'+esc(w.entry_type)+'">'+esc(w.name)+'</button>').join(' '))+'</article>').join(''):'<p class="muted">No events yet. Add your first milestone.</p>';
+ document.querySelectorAll('[data-event]').forEach(b=>b.onclick=()=>editChronicle(list.find(e=>e.id===b.dataset.event),world));
+ document.querySelectorAll('[data-world]').forEach(b=>b.onclick=()=>openWiki(b.dataset.world,b.dataset.type));
+ async function editChronicle(e,known=world){
+  const host=document.getElementById('chronicleEdit');
+  host.innerHTML='<div class="panel"><h3>'+(e?'Edit':'New')+' Event</h3><label>Title</label><input id="ceTitle" value="'+esc(e?.title||'')+'"><label>Year (blank if unknown)</label><input id="ceYear" type="number" step="1" value="'+(e?.event_year??'')+'"><label>Era (optional)</label><input id="ceEra" value="'+esc(e?.era_label||'')+'"><label><input id="ceApprox" type="checkbox" '+(e?.approximate?'checked':'')+'> Approximate</label><label>Description</label><textarea id="ceDesc">'+esc(e?.description||'')+'</textarea><h4>Related World entries</h4>'+known.map(w=>'<label><input type="checkbox" data-ce-link="'+esc(w.id)+'" '+((e?.related_entry_ids||[]).includes(w.id)?'checked':'')+'> '+esc(w.name)+'</label>').join('')+'<div class="actions">'+button('Save','ceSave','gold')+button('Cancel','ceCancel')+(e?button('Delete','ceDelete'):'')+'</div></div>';
+  document.getElementById('ceCancel').onclick=()=>host.innerHTML='';
+  document.getElementById('ceSave').onclick=async()=>{
+   const title=document.getElementById('ceTitle').value.trim(),year=document.getElementById('ceYear').value;
+   if(!title||title.length>200){msg('Enter an event title (up to 200 characters).');return}
+   const payload={project_id:project.id,title,event_year:year===''?null:Number(year),approximate:document.getElementById('ceApprox').checked,era_label:document.getElementById('ceEra').value,description:document.getElementById('ceDesc').value,related_entry_ids:[...host.querySelectorAll('[data-ce-link]:checked')].map(b=>b.dataset.ceLink)};
+   const btn=document.getElementById('ceSave');btn.disabled=true;
+   const {error:err}=await(e?client.from('chronicle_events').update(payload).eq('project_id',project.id).eq('id',e.id):client.from('chronicle_events').insert(payload));
+   if(err){btn.disabled=false;msg(err.message);return}await chronicleView();
+  };
+  if(e)document.getElementById('ceDelete').onclick=async()=>{if(!confirm('Delete this event?'))return;const {error:err}=await client.from('chronicle_events').delete().eq('project_id',project.id).eq('id',e.id);if(err)return error(err);await chronicleView()};
+ }
+ scheduleScrollLayout();
+}
+
 function navigationUI(){
- const current=section==='chapters'?'chapters':worldSections.includes(section)?'world':section==='board'?'board':'';
+ const current=section==='chapters'?'chapters':(worldSections.includes(section)||section==='chronicle')?'world':section==='board'?'board':'';
  const items=[['chapters','▤','Manuscript'],['world','♜','World'],['board','☷','Council']];
  const links=items.map(([id,symbol,label])=>'<button type="button" data-destination="'+id+'" '+(current===id?'aria-current="page"':'')+'><span class="nav-symbol" aria-hidden="true">'+symbol+'</span>'+label+'</button>').join('');
- return '<div class="realm-head"><div><div class="muted">CURRENT REALM</div><h2>'+esc(project.name)+'</h2></div>'+button('⇄ Realms','back')+'</div><nav class="primary-nav" aria-label="Main navigation">'+items.map(([id,symbol,label])=>button(symbol+' '+label,'nav_'+id,current===id?'gold':'')).join('')+'</nav><nav class="mobile-nav" aria-label="Main navigation">'+links+'</nav>'+(worldSections.includes(section)?'<div class="world-nav">'+worldSections.map(k=>button(k[0].toUpperCase()+k.slice(1),'world_'+k,section===k?'gold':'')).join('')+'</div><div class="wiki-search"><input type="search" id="wikiSearch" placeholder="⌕ Search this realm" aria-label="Search world entries"><div id="wikiResults"></div></div>':'');
+ return '<div class="realm-head"><div><div class="muted">CURRENT REALM</div><h2>'+esc(project.name)+'</h2></div>'+button('⇄ Realms','back')+'</div><nav class="primary-nav" aria-label="Main navigation">'+items.map(([id,symbol,label])=>button(symbol+' '+label,'nav_'+id,current===id?'gold':'')).join('')+'</nav><nav class="mobile-nav" aria-label="Main navigation">'+links+'</nav>'+((worldSections.includes(section)||section==='chronicle')?'<div class="world-nav">'+[...worldSections,'chronicle'].map(k=>button(k[0].toUpperCase()+k.slice(1),'world_'+k,section===k?'gold':'')).join('')+'</div><div class="wiki-search"><input type="search" id="wikiSearch" placeholder="⌕ Search this realm" aria-label="Search world entries"><div id="wikiResults"></div></div>':'');
 }
 function bindNavigation(){
  document.getElementById('back').onclick=()=>{clearTimeout(timer);stopLive();project=null;active=null;projectList()};
  document.querySelectorAll('[data-destination]').forEach(b=>b.onclick=()=>navigate(b.dataset.destination));
  for(const k of ['chapters','world','board']){const b=document.getElementById('nav_'+k);if(b)b.onclick=()=>navigate(k)}
- for(const k of worldSections){const b=document.getElementById('world_'+k);if(b)b.onclick=()=>navigate(k)}
+ for(const k of [...worldSections,'chronicle']){const b=document.getElementById('world_'+k);if(b)b.onclick=()=>navigate(k)}
 }
 
-async function workspace(){root.classList.remove('focus-mode','world-detail','world-list','long-world-list','chapter-detail','chapter-list','long-chapter-list');stopLive();if(section==='profile')return profileView();if(section==='board')return boardView();if(section==='members')return membersView();if(section==='settings')return realmSettings();frame(navigationUI()+'<div class="grid"><aside class="panel"><div class="entry-heading"><h3>'+({chapters:'Chapters',characters:'Characters',factions:'Factions',locations:'Locations',lore:'Lore'}[section])+'</h3><div class="actions">'+button('＋ New','newEntry','gold')+button('▾','toggleEntries')+'</div></div><div id="entries" class="entry-list" style="margin-top:12px">Loading…</div></aside><div class="panel" id="editor">Choose an entry or create one.</div></div>');bindNavigation();if(worldSections.includes(section))setupWikiSearch();else if(section==='chapters')loadWikiIndex().then(()=>{if(section==='chapters'&&active&&!chapterEditing){const rec=records.find(x=>x.id===active),el=document.getElementById('editor');if(rec&&el)drawChapterReader(rec,el)}});document.getElementById('toggleEntries').onclick=()=>{const el=document.getElementById('entries');el.classList.toggle('collapsed');document.getElementById('toggleEntries').textContent=el.classList.contains('collapsed')?'▸':'▾'};document.getElementById('newEntry').onclick=()=>createEntry();await loadEntries()}
+async function workspace(){root.classList.remove('focus-mode','world-detail','world-list','long-world-list','chapter-detail','chapter-list','long-chapter-list');stopLive();if(section==='profile')return profileView();if(section==='board')return boardView();if(section==='chronicle')return chronicleView();if(section==='members')return membersView();if(section==='settings')return realmSettings();frame(navigationUI()+'<div class="grid"><aside class="panel"><div class="entry-heading"><h3>'+({chapters:'Chapters',characters:'Characters',factions:'Factions',locations:'Locations',lore:'Lore'}[section])+'</h3><div class="actions">'+button('＋ New','newEntry','gold')+button('▾','toggleEntries')+'</div></div><div id="entries" class="entry-list" style="margin-top:12px">Loading…</div></aside><div class="panel" id="editor">Choose an entry or create one.</div></div>');bindNavigation();if(worldSections.includes(section))setupWikiSearch();else if(section==='chapters')loadWikiIndex().then(()=>{if(section==='chapters'&&active&&!chapterEditing){const rec=records.find(x=>x.id===active),el=document.getElementById('editor');if(rec&&el)drawChapterReader(rec,el)}});document.getElementById('toggleEntries').onclick=()=>{const el=document.getElementById('entries');el.classList.toggle('collapsed');document.getElementById('toggleEntries').textContent=el.classList.contains('collapsed')?'▸':'▾'};document.getElementById('newEntry').onclick=()=>createEntry();await loadEntries()}
 async function loadEntries(){const cfg=configs[section];let q=client.from(cfg.table||'archive_entries').select('*').eq('project_id',project.id);if(cfg.type)q=q.eq('entry_type',cfg.type);let {data,error:e}=await q.order(section==='chapters'?'chapter_order':'updated_at',{ascending:section==='chapters'});if(e&&section==='chapters'&&(/chapter_order|does not exist|schema cache/i).test(e.message||'')){({data,error:e}=await client.from('chapters').select('*').eq('project_id',project.id).order('id',{ascending:true}));}if(e)return error(e);records=data||[];const list=document.getElementById('entries');if(!list)return;if(section==='characters'){
  const {data:factions,error:fe}=await client.from('archive_entries').select('id,name').eq('project_id',project.id).eq('entry_type','faction').order('name');
  if(fe)return error(fe);
